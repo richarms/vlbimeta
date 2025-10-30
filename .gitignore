@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+
+.venv/
+venv/
+env/
+
+.ipynb_checkpoints/
+example_vdif
+
+
+.DS_Store
+
+# Generated data products
+pwr_files/
+rdb_files/
+*_power.png
+*_pwr.csv
+*_tsys.csv

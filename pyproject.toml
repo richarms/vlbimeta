@@ -1,0 +1,13 @@
+[project]
+name = "vlbimeta"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "astropy>=7.1.1",
+    "baseband>=4.3.0",
+    "katdal>=0.23",
+    "matplotlib>=3.10.7",
+    "numpy>=2.3.4",
+    "pandas>=2.3.3",
+    "scipy>=1.16.3",
+]

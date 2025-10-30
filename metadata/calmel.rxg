@@ -1,0 +1,70 @@
+*
+* calmel.rxg - MeerKAT L band receiver parameter definition 
+*
+* first line: LO values and ranges, format:
+*  type   frequencies
+* if type is range, the two values: lower and upper frequencies
+* if type is fixed, then the fixed value frequencies in MHz
+*fixed 1510
+range 1400 1570
+*
+* 2nd line: creation date
+* format:  yyyy ddd or yyyy mm dd (0 is valid for all for intial set-up)
+2025 02 19
+*
+* 3rd line: FWHM beamwidthm format:
+*   model value
+* if type is frequncy, then fwhm=value*1.22*c/(freq*diameter)
+*                      value is 1.0 if omitted
+* if type is constant, then fwhm=value (degrees)
+frequency 1.0
+*
+* 4th line polarizations available
+lcp rcp
+*
+* 5th line: DPFU (degrees/Jansky) for polarizations in previous line in order
+1.0 1.0
+*
+* 6th line: gain curve (only one) for ALL polarizations in 4th line
+* TYPE FORM COEFFICENTS ... (maximum coefficents = 10)
+* FORM = POLY only for now
+* TYPE - ELEV or ALTAZ only for now
+* COEFFICENTS - variable number of number values
+ELEV POLY 1.0
+*
+* 7th and following lines: tcal versus frequency
+*     Format: POL FREQ TCAL
+*     where:
+*            POL    polarization rcp or lcp
+*            FREQ   frequency (MHz)
+*            TCAL   degrees K
+*
+*     MAXIMUM ENTRIES 100, group by polarization
+*                          then sorted by increasing freq
+*tcal table ends with end_tcal_table record
+lcp 1600.0 1.0
+lcp 1620.0 1.0
+lcp 1640.0 1.0
+lcp 1660.0 1.0
+lcp 1680.0 1.0
+lcp 1700.0 1.0
+rcp 1600.0 1.0
+rcp 1620.0 1.0
+rcp 1640.0 1.0
+rcp 1660.0 1.0
+rcp 1680.0 1.0
+rcp 1700.0 1.0
+end_tcal_table
+*
+* Trec - receiver temperature, degrees K
+* if value is zero, no opacity corrections are used
+0.0  0.0
+*
+* Spillover table
+* format: elevation temperature
+*  elevation is angular degrees above horizon
+*  temperature is Kelvin degrees of spillover noise
+*spillover table ends with end_spillover_table record
+*
+end_spillover_table
+*
