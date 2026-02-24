@@ -5,8 +5,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from vlbimeta.telstate_antab_from_mean_power import main
+from vlbimeta.controller_entrypoint import main
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

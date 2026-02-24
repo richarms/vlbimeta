@@ -1,6 +1,11 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "vlbimeta"
 version = "0.1.0"
+description = "VLBI post-processing utilities and controller entrypoints"
 requires-python = ">=3.11"
 dependencies = [
     "astropy>=7.1.1",
@@ -11,3 +16,20 @@ dependencies = [
     "pandas>=2.3.3",
     "scipy>=1.16.3",
 ]
+
+[project.scripts]
+vlbimeta = "vlbimeta.controller_entrypoint:main"
+vlbimeta.py = "vlbimeta.controller_entrypoint:main"
+vdif-power-summary = "vlbimeta.vdif_power_summary:main"
+vdif-power-antab = "vlbimeta.vdif_power_antab:main"
+telstate-antab-from-mean-power = "vlbimeta.telstate_antab_from_mean_power:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vlbimeta = ["catalogues/*.csv", "metadata/*"]
