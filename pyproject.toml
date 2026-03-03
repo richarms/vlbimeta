@@ -6,20 +6,20 @@ build-backend = "setuptools.build_meta"
 name = "vlbimeta"
 version = "0.1.0"
 description = "VLBI post-processing utilities and controller entrypoints"
-requires-python = ">=3.11"
+requires-python = ">=3.8"
 dependencies = [
-    "astropy>=7.1.1",
-    "baseband>=4.3.0",
+    "astropy>=4.2",
+    "baseband>=4.1.3",
     "katdal>=0.23",
-    "matplotlib>=3.10.7",
-    "numpy>=2.3.4",
-    "pandas>=2.3.3",
-    "scipy>=1.16.3",
+    "importlib-resources>=6.1.1",
+    "matplotlib>=3.3.4",
+    "numpy>=1.20.1",
+    "pandas>=1.2.2",
+    "scipy>=1.10.1",
 ]
 
 [project.scripts]
 vlbimeta = "vlbimeta.controller_entrypoint:main"
-vlbimeta.py = "vlbimeta.controller_entrypoint:main"
 vdif-power-summary = "vlbimeta.vdif_power_summary:main"
 vdif-power-antab = "vlbimeta.vdif_power_antab:main"
 telstate-antab-from-mean-power = "vlbimeta.telstate_antab_from_mean_power:main"

@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import os
-from importlib import resources
 from pathlib import Path
+
+try:
+    from importlib.resources import files as resource_files
+except ImportError:
+    from importlib_resources import files as resource_files
 
 
 def package_asset_dir(name: str) -> Path:
     """Return the installed package asset directory (best-effort filesystem path)."""
-    return Path(resources.files("vlbimeta").joinpath(name))
+    return Path(resource_files("vlbimeta").joinpath(name))
 
 
 def image_app_root() -> Path:
