@@ -7,14 +7,16 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 import numpy as np
 import pandas as pd
 from astropy.time import Time as ap_time
 
 import katdal
+import katsdptelstate
 
+from .runtime import default_mean_power_sensor_keys
 from .vdif_power_antab import (
     AntabWriter,
     StationCalibrator,
@@ -114,6 +116,24 @@ def resolve_telstate_source(args: argparse.Namespace) -> str | None:
     return None
 
 
+def open_katdal_dataset(
+    dataset_source: str,
+    capture_block_id: str | None = None,
+    stream_name: str | None = None,
+) -> katdal.DataSet:
+    kwargs = {}
+    if capture_block_id is not None:
+        kwargs["capture_block_id"] = capture_block_id
+    if stream_name is not None:
+        kwargs["stream_name"] = stream_name
+        kwargs["chunk_store"] = None
+    return katdal.open(dataset_source, **kwargs)
+
+
+def open_telstate_view(telstate_endpoint: str, capture_block_id: str):
+    return katsdptelstate.TelescopeState(telstate_endpoint).view(capture_block_id)
+
+
 def find_sensor_key(telstate, thread: int, templates: Iterable[str], cbid: str) -> str:
     for template in templates:
         key = template.format(cbid=cbid, thread=thread)
@@ -133,6 +153,18 @@ def load_mean_power(
     templates = [primary_template, *fallback_templates]
     for thread in thread_indices:
         key = find_sensor_key(telstate, thread, templates, cbid)
+        values = telstate.get_range(key, st=0)  # type: ignore[attr-defined]
+        if not values:
+            raise RuntimeError(f"Mean-power sensor '{key}' returned no samples.")
+        sensor_data[thread] = values
+    return sensor_data
+
+
+def load_mean_power_from_keys(telstate, sensor_keys: Sequence[str]) -> dict[int, list[tuple[float, float]]]:
+    sensor_data: dict[int, list[tuple[float, float]]] = {}
+    for thread, key in enumerate(sensor_keys):
+        if key not in telstate:  # type: ignore[operator]
+            raise KeyError(f"Unable to locate mean-power sensor '{key}' in telstate.")
         values = telstate.get_range(key, st=0)  # type: ignore[attr-defined]
         if not values:
             raise RuntimeError(f"Mean-power sensor '{key}' returned no samples.")
@@ -244,7 +276,7 @@ def main() -> None:
         gain_tab=args.gain_tab,
     )
     dataset_path = calibrator._resolve_dataset()
-    dataset = katdal.open(dataset_path)
+    dataset = open_katdal_dataset(dataset_path)
     telstate = dataset.source.telstate
     calibrator.compute_cal_sols(circ_pol=apply_l2c_conversion)
 
@@ -278,6 +310,75 @@ def main() -> None:
     antab_writer.write_to_file(antab_path)
     dataset.close()
     print(f"ANTAB written to {antab_path}")
+
+
+def generate_antab_from_capture(
+    *,
+    experiment: str,
+    capture_block_id: str,
+    stream_name: str,
+    telstate_endpoint: str,
+    station_code: str,
+    rxg_path: Path,
+    catalogue_path: Path,
+    power_dir: Path,
+    metadata_dir: Path,
+    rdb_dir: Path,
+    gain_tab: float = 0.5,
+    sensor_pols: Sequence[str] = ("x", "y"),
+    time_buffer: float = 0.0,
+) -> Path:
+    if not catalogue_path.exists():
+        raise FileNotFoundError(f"Catalogue not found: {catalogue_path}")
+    if not rxg_path.exists():
+        raise FileNotFoundError(f"RXG file not found: {rxg_path}")
+
+    vex_params, scan_data, _ = parse_vlbi_cat(catalogue_path)
+    if any(value is None for value in vex_params.values()) or len(vex_params["CHANNELS"]) == 0:
+        raise RuntimeError("Invalid observation catalogue header.")
+    antab_chan_map = {"R1": "lsb-pol0", "L1": "lsb-pol1", "R2": "usb-pol0", "L2": "usb-pol1"}
+    _, bw_chan, fc_chans, antab_chan_def = parse_chan_params(vex_params, antab_chan_map)
+    apply_l2c_conversion = vex_params["POL"] == "RL"
+
+    dataset_source = f"redis://{telstate_endpoint}"
+    telstate = open_telstate_view(telstate_endpoint, capture_block_id)
+    calibrator = StationCalibrator(
+        capture_block_id,
+        experiment,
+        fc_chans,
+        bw_chan,
+        rdb_dir,
+        power_dir,
+        dataset_source,
+        gain_tab=gain_tab,
+        dataset_capture_block_id=capture_block_id,
+        dataset_stream_name=stream_name,
+    )
+    calibrator.compute_cal_sols(circ_pol=apply_l2c_conversion)
+
+    channel_order = build_thread_mapping(fc_chans)
+    sensor_keys = default_mean_power_sensor_keys(stream_name, channel_order, sensor_pols=sensor_pols)
+    sensor_series = load_mean_power_from_keys(telstate, sensor_keys)
+    antab_scans = [scan_name for scan_name in scan_data.keys() if scan_name.startswith("scan No")]
+    if not antab_scans:
+        raise RuntimeError("No scans matching 'scan No*' found in the catalogue for ANTAB generation.")
+    scan_subset = {scan_name: scan_data[scan_name] for scan_name in antab_scans}
+
+    tsys_fns = derive_tsys_files(
+        calibrator,
+        sensor_series,
+        channel_order,
+        scan_subset,
+        power_dir,
+        time_buffer,
+    )
+
+    antab_writer = AntabWriter(station_code, rxg_path, antab_chan_def)
+    scans_tgts = {scan_name: scan_data[scan_name]["target"] for scan_name in scan_subset.keys()}
+    antab_writer.make_file(experiment, tsys_fns, antab_chan_map, scans_tgts)
+    antab_path = metadata_dir / f"{experiment}{station_code}.antab"
+    antab_writer.write_to_file(antab_path)
+    return antab_path
 
 
 if __name__ == "__main__":
