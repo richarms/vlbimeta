@@ -76,11 +76,24 @@ def finalise_product_dir(paths: AntabProductPaths) -> None:
     paths.writing_dir.rename(paths.final_dir)
 
 
+def _collapse_nested_vdif_dir(source_dir: Path, final_basename: str) -> None:
+    nested_dir = source_dir / final_basename
+    if not nested_dir.is_dir():
+        return
+    for child in nested_dir.iterdir():
+        destination = source_dir / child.name
+        if destination.exists():
+            raise FileExistsError(f"Refusing to overwrite existing path while flattening VDIF output: {destination}")
+        child.rename(destination)
+    nested_dir.rmdir()
+
+
 def finalise_vdif_dir(paths: AntabProductPaths) -> Path:
     if paths.final_vdif_dir.exists():
         return paths.final_vdif_dir
     if paths.vdif_dir == paths.final_vdif_dir:
         return paths.final_vdif_dir
+    _collapse_nested_vdif_dir(paths.vdif_dir, paths.final_vdif_dir.name)
     paths.vdif_dir.rename(paths.final_vdif_dir)
     return paths.final_vdif_dir
 

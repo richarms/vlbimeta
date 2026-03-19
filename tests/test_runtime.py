@@ -54,6 +54,23 @@ def test_finalise_vdif_dir_renames_writing(tmp_path: Path) -> None:
     assert not writing.exists()
 
 
+def test_finalise_vdif_dir_flattens_nested_scan_dir(tmp_path: Path) -> None:
+    capture_root = tmp_path / "177"
+    capture_root.mkdir()
+    writing = capture_root / "177_vdif.writing"
+    nested = writing / "177_vdif"
+    nested.mkdir(parents=True)
+    shard = nested / "177_vdif.00000000"
+    shard.write_bytes(b"test")
+
+    paths = antab_product_paths(tmp_path, "177")
+    final_vdif_dir = finalise_vdif_dir(paths)
+
+    assert final_vdif_dir == capture_root / "177_vdif"
+    assert (final_vdif_dir / "177_vdif.00000000").read_bytes() == b"test"
+    assert not nested.exists()
+
+
 def test_derive_experiment_name_prefers_override() -> None:
     obs_params = {"proposal_id": "ignored"}
     assert derive_experiment_name(obs_params, "custom") == "custom"
