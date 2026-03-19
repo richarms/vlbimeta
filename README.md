@@ -28,6 +28,12 @@ Current MVP target:
 - generate `antab`
 - generate per-product `metadata.json`
 
+Implemented local-development path:
+
+- `vlbimeta` can also run in `pass_through` mode
+- this finalises the VDIF product directory and writes a metadata-only postprocess product
+- it is intended for environments where calibration is not available
+
 Deferred for now:
 
 - `uvflag`
@@ -40,25 +46,48 @@ Fallback / debug path:
 - this is useful for validation or recovery
 - it is not the primary operational source of truth
 
+## Calibration Requirement
+
+The current `antab` implementation assumes MeerKAT tied-array calibration
+products are available.
+
+In practice this means:
+
+- telstate mean-power on its own is not enough
+- `vlbimeta` expects calibration products equivalent to `katsdpcal` output
+- the localhost sandbox `sim_vlbi_local.cfg` path does not currently launch `katsdpcal`
+- therefore localhost can validate task plumbing and `pass_through`, but not calibrated `ANTAB`
+
+Recommended operational policy:
+
+- `antab` mode should require calibration and fail clearly if it is absent
+- `pass_through` mode is the intended local development fallback
+
 ## Controller Entrypoint (Current Contract)
 
 The container/runtime entrypoint expected by `katsdpcontroller` is:
 
-`vlbimeta.py <data_dir> <capture_block_id> <stream_name>`
+`vlbimeta.py <data_dir> <capture_block_id> <stream_name> [--mode antab|pass_through|disabled]`
 
-Currently:
+Current behaviour:
 
-- validates `data_dir` exists and is a directory
-- logs invocation parameters and resolved asset paths
-- exits successfully (`0`)
-- doesn't do anything real yet
+- resolves capture/product directories from `data_dir`
+- accepts `--telstate` from `katsdpcontroller`
+- derives experiment metadata from telstate `obs_params`
+- supports explicit modes:
+  - `antab`
+  - `pass_through`
+  - `disabled`
+- in `pass_through` mode:
+  - finalises `<cbid>_vdif.writing` to `<cbid>_vdif`
+  - writes `<cbid>_antab/metadata.json`
+  - exits successfully without generating calibrated `ANTAB`
 
-This contract is intentionally minimal today, but the MVP implementation will need to resolve:
+Remaining `antab`-mode contract work:
 
-- the telstate dataset for the completed capture block
 - the canonical mean-power sensor naming / thread ordering
-- the experiment / catalogue metadata required for `antab`
-- the output product directory and `metadata.json` contract
+- the calibration source contract for tied-array VLBI
+- the final success/failure policy when calibration is absent
 
 ## Package Layout
 
@@ -72,6 +101,6 @@ Console entry points are provided for:
 
 Current status of these entry points:
 
-- `vlbimeta` is the scheduled controller entrypoint but is still a no-op
-- `telstate-antab-from-mean-power` is the closest prototype to the intended MVP data path
+- `vlbimeta` is the scheduled controller entrypoint and supports a metadata-only `pass_through` path
+- `telstate-antab-from-mean-power` is the closest prototype to the intended calibrated `ANTAB` data path
 - `vdif-power-summary` and `vdif-power-antab` remain useful as fallback/debug tooling and for validation against telstate-derived power
