@@ -458,6 +458,8 @@ class StationCalibrator:
         out_dir: Path,
         telstate_source: str | None,
         gain_tab: float = 0.5,
+        dataset_capture_block_id: str | None = None,
+        dataset_stream_name: str | None = None,
     ):
         self.obs_cbid = obs_cbid
         self.exp_name = exp_name
@@ -467,6 +469,8 @@ class StationCalibrator:
         self.out_dir = Path(out_dir)
         self.telstate_source = telstate_source
         self.gain_tab = gain_tab
+        self.dataset_capture_block_id = dataset_capture_block_id
+        self.dataset_stream_name = dataset_stream_name
 
     def _download_rdb(self, destination: Path) -> None:
         url = f"http://archive-gw-1.kat.ac.za/{self.obs_cbid}/{self.obs_cbid}_sdp_l0.full.rdb"
@@ -483,6 +487,16 @@ class StationCalibrator:
         if not default_path.exists():
             self._download_rdb(default_path)
         return str(default_path)
+
+    def _open_dataset(self):
+        dataset = self._resolve_dataset()
+        kwargs = {}
+        if self.dataset_capture_block_id is not None:
+            kwargs["capture_block_id"] = self.dataset_capture_block_id
+        if self.dataset_stream_name is not None:
+            kwargs["stream_name"] = self.dataset_stream_name
+            kwargs["chunk_store"] = None
+        return katdal.open(dataset, **kwargs)
 
     def clean_bandpass(self, bp_gains: dict[str, np.ndarray], cal_channel_freqs: np.ndarray, max_gap_Hz: float):
         clean_gains: dict[str, np.ndarray] = {}
@@ -505,8 +519,7 @@ class StationCalibrator:
         return clean_gains
 
     def compute_cal_sols(self, clean_bandpass: bool = True, clean_maxgap_hz: float = 50.0e6, circ_pol: bool = False):
-        dataset = self._resolve_dataset()
-        d = katdal.open(dataset)
+        d = self._open_dataset()
         ant_names = [ant.name for ant in d.ants]
         pols = d.source.telstate["cal_pol_ordering"]
         freqs = d.freqs
