@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from vlbimeta.controller_entrypoint import parse_args
 from vlbimeta.runtime import (
     antab_product_paths,
     default_mean_power_sensor_keys,
@@ -85,6 +86,11 @@ def test_resolve_catalogue_path_normalises_case(tmp_path: Path) -> None:
     catalogue = tmp_path / "vlbi_cat_es116a.csv"
     catalogue.write_text("# EXPERIMENT ES116A\n", encoding="utf-8")
     assert resolve_catalogue_path(tmp_path, "ES116A") == catalogue
+
+
+def test_controller_parse_args_dataset_stream_name() -> None:
+    args = parse_args(["/tmp/data", "177", "sdp_vdif", "--dataset-stream-name", "sdp_l0"])
+    assert args.dataset_stream_name == "sdp_l0"
 
 
 def test_default_mean_power_sensor_keys() -> None:

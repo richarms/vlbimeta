@@ -317,6 +317,7 @@ def generate_antab_from_capture(
     experiment: str,
     capture_block_id: str,
     stream_name: str,
+    dataset_stream_name: str | None,
     telstate_endpoint: str,
     station_code: str,
     rxg_path: Path,
@@ -352,7 +353,7 @@ def generate_antab_from_capture(
         dataset_source,
         gain_tab=gain_tab,
         dataset_capture_block_id=capture_block_id,
-        dataset_stream_name=stream_name,
+        dataset_stream_name=dataset_stream_name,
     )
     calibrator.compute_cal_sols(circ_pol=apply_l2c_conversion)
 

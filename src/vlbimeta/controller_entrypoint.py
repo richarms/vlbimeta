@@ -32,6 +32,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("capture_block_id", help="Capture block ID for the completed observation.")
     parser.add_argument("stream_name", help="VDIF stream name for this post-processing task.")
     parser.add_argument(
+        "--dataset-stream-name",
+        default=None,
+        help="Telstate dataset stream name for calibration products (defaults to katdal's normal resolution).",
+    )
+    parser.add_argument(
         "--mode",
         choices=("antab", "pass_through", "disabled"),
         default="antab",
@@ -232,6 +237,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         experiment=experiment,
         capture_block_id=args.capture_block_id,
         stream_name=args.stream_name,
+        dataset_stream_name=args.dataset_stream_name,
         telstate_endpoint=args.telstate,
         station_code=args.station_code,
         rxg_path=rxg_path,
