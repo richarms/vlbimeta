@@ -235,6 +235,19 @@ The package should be cleaned up around product responsibilities:
 The old notebooks under `ipynb/` should be treated as reference material for
 algorithms and output formats, not as production source.
 
+## Development Environment
+
+Use a package-local virtual environment for development and tests:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv venv .venv
+UV_CACHE_DIR=.uv-cache uv pip install -e '.[test]'
+.venv/bin/python -m pytest
+```
+
+The local `.venv/`, `.uv-cache/`, and generated `*.egg-info/` metadata are
+ignored by git.
+
 ## Console Entry Points
 
 Python code lives under `src/vlbimeta/` and is installable via `pyproject.toml`.

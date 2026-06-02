@@ -7,20 +7,20 @@ from __future__ import annotations
 import argparse
 import urllib.request
 from contextlib import ExitStack
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
 import astropy.units as u
 import baseband.vdif
 import katdal
-import katpoint
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy.ndimage
 from astropy.time import Time as ap_time, TimeDelta
 
+from .catalogue import legacy_scan_dict, parse_vlbi_catalogue
 
 
 def _parse_labels(raw: str | None) -> list[str] | None:
@@ -282,48 +282,8 @@ def save_plot(df: pd.DataFrame, plot_path: Path) -> None:
 
 
 def parse_vlbi_cat(vlbi_cat_fn: Path, proc_buffer_sec: int = 1, ref_ant=None):
-    with open(vlbi_cat_fn, "r") as cat_file:
-        csv_lines = [line for line in cat_file.readlines()]
-    header_lines = [line[1:].strip() for line in csv_lines if line.startswith("#")]
-    hdr_keys, hdr_ch_key = ["EXPERIMENT", "POL", "CAL_PREFIX"], "CH"
-    obs_params = dict.fromkeys(hdr_keys)
-    obs_params["CHANNELS"] = {}
-    for line in header_lines:
-        hdr_key, hdr_par = line.split(" ")[0], line.split(" ")[1:]
-        if hdr_key in hdr_keys:
-            obs_params[hdr_key] = " ".join(hdr_par)
-        elif line.startswith(hdr_ch_key):
-            obs_params["CHANNELS"][hdr_key] = hdr_par
-    scan_params = {}
-    scan_lines = [line for line in csv_lines if not line.startswith("#")]
-    for scan_line in scan_lines:
-        scan_name = scan_line.split(",")[-3].strip()
-        start_time_str = scan_line.split(",")[-2].strip()
-        start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S.%f")
-        start_time = start_time.replace(tzinfo=timezone.utc)
-        start_time_proc = start_time - timedelta(seconds=proc_buffer_sec)
-        duration = int(scan_line.split(",")[-1])
-        tgt_string = scan_line.split(",")[0].split("|")[0].strip()
-        tgt_string = tgt_string[1:] if tgt_string.startswith("*") else tgt_string
-        kp_target_ln = ", ".join([kp.strip(" ") for kp in scan_line.split(",")[:-3]])
-        scan_params[scan_name] = {
-            "target": tgt_string,
-            "start_iso": scan_line.split(",")[-2],
-            "start_ts": start_time.timestamp(),
-            "duration": duration,
-            "kp_tgt": katpoint.Target(kp_target_ln, antenna=ref_ant),
-            "proc_start_iso": start_time_proc.strftime("%Y-%m-%dT%H:%M:%S.%f"),
-            "proc_start_ts": start_time_proc.timestamp(),
-            "proc_duration": duration + 2 * proc_buffer_sec,
-        }
-    sorted_params = sorted(scan_params.items(), key=lambda e: e[1]["start_ts"])
-    scan_params = dict(sorted_params)
-    kp_target_list = []
-    for _, scan_pars in scan_params.items():
-        if scan_pars["kp_tgt"] not in kp_target_list:
-            kp_target_list.append(scan_pars["kp_tgt"])
-    vlbi_cat = katpoint.Catalogue(kp_target_list, antenna=ref_ant)
-    return obs_params, scan_params, vlbi_cat
+    catalogue = parse_vlbi_catalogue(vlbi_cat_fn, proc_buffer_sec=proc_buffer_sec, ref_ant=ref_ant)
+    return catalogue.obs_params, legacy_scan_dict(catalogue), catalogue.katpoint_catalogue
 
 
 def parse_chan_params(vex_params: dict, chan_map: dict[str, str]):
