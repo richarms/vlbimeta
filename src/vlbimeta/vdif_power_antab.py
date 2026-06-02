@@ -7,19 +7,20 @@ from __future__ import annotations
 import argparse
 import urllib.request
 from contextlib import ExitStack
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Sequence
 
 import astropy.units as u
 import baseband.vdif
 import katdal
-import katpoint
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy.ndimage
 from astropy.time import Time as ap_time, TimeDelta
+
+from .catalogue import legacy_scan_dict, parse_vlbi_catalogue
 
 
 def _parse_labels(raw: str | None) -> list[str] | None:
@@ -281,48 +282,8 @@ def save_plot(df: pd.DataFrame, plot_path: Path) -> None:
 
 
 def parse_vlbi_cat(vlbi_cat_fn: Path, proc_buffer_sec: int = 1, ref_ant=None):
-    with open(vlbi_cat_fn, "r") as cat_file:
-        csv_lines = [line for line in cat_file.readlines()]
-    header_lines = [line[1:].strip() for line in csv_lines if line.startswith("#")]
-    hdr_keys, hdr_ch_key = ["EXPERIMENT", "POL", "CAL_PREFIX"], "CH"
-    obs_params = dict.fromkeys(hdr_keys)
-    obs_params["CHANNELS"] = {}
-    for line in header_lines:
-        hdr_key, hdr_par = line.split(" ")[0], line.split(" ")[1:]
-        if hdr_key in hdr_keys:
-            obs_params[hdr_key] = " ".join(hdr_par)
-        elif line.startswith(hdr_ch_key):
-            obs_params["CHANNELS"][hdr_key] = hdr_par
-    scan_params = {}
-    scan_lines = [line for line in csv_lines if not line.startswith("#")]
-    for scan_line in scan_lines:
-        scan_name = scan_line.split(",")[-3].strip()
-        start_time_str = scan_line.split(",")[-2].strip()
-        start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S.%f")
-        start_time = start_time.replace(tzinfo=timezone.utc)
-        start_time_proc = start_time - timedelta(seconds=proc_buffer_sec)
-        duration = int(scan_line.split(",")[-1])
-        tgt_string = scan_line.split(",")[0].split("|")[0].strip()
-        tgt_string = tgt_string[1:] if tgt_string.startswith("*") else tgt_string
-        kp_target_ln = ", ".join([kp.strip(" ") for kp in scan_line.split(",")[:-3]])
-        scan_params[scan_name] = {
-            "target": tgt_string,
-            "start_iso": scan_line.split(",")[-2],
-            "start_ts": start_time.timestamp(),
-            "duration": duration,
-            "kp_tgt": katpoint.Target(kp_target_ln, antenna=ref_ant),
-            "proc_start_iso": start_time_proc.strftime("%Y-%m-%dT%H:%M:%S.%f"),
-            "proc_start_ts": start_time_proc.timestamp(),
-            "proc_duration": duration + 2 * proc_buffer_sec,
-        }
-    sorted_params = sorted(scan_params.items(), key=lambda e: e[1]["start_ts"])
-    scan_params = dict(sorted_params)
-    kp_target_list = []
-    for _, scan_pars in scan_params.items():
-        if scan_pars["kp_tgt"] not in kp_target_list:
-            kp_target_list.append(scan_pars["kp_tgt"])
-    vlbi_cat = katpoint.Catalogue(kp_target_list, antenna=ref_ant)
-    return obs_params, scan_params, vlbi_cat
+    catalogue = parse_vlbi_catalogue(vlbi_cat_fn, proc_buffer_sec=proc_buffer_sec, ref_ant=ref_ant)
+    return catalogue.obs_params, legacy_scan_dict(catalogue), catalogue.katpoint_catalogue
 
 
 def parse_chan_params(vex_params: dict, chan_map: dict[str, str]):
@@ -518,29 +479,155 @@ class StationCalibrator:
             clean_gains[inp] = interp_bp
         return clean_gains
 
+    @staticmethod
+    def _find_telstate_key(telstate, candidates: Sequence[str]) -> str | None:
+        for key in candidates:
+            try:
+                if key in telstate:  # type: ignore[operator]
+                    return key
+            except Exception:
+                pass
+            try:
+                telstate[key]
+            except KeyError:
+                continue
+            else:
+                return key
+        return None
+
+    def _get_telstate_range(self, telstate, candidates: Sequence[str]) -> list[tuple[object, float]]:
+        key = self._find_telstate_key(telstate, candidates)
+        if key is None:
+            joined = ", ".join(candidates)
+            raise KeyError(f"Unable to locate telstate key matching any of: {joined}")
+        values = telstate.get_range(key, st=0)
+        if not values:
+            raise RuntimeError(f"Telstate key '{key}' returned no samples.")
+        return values
+
+    def _antenna_names(self, dataset, telstate, pols: Sequence[str]) -> list[str]:
+        ant_names = [ant.name for ant in dataset.ants]
+        if ant_names:
+            return ant_names
+        bls_ordering_key = self._find_telstate_key(
+            telstate,
+            (
+                "bls_ordering",
+                f"{self.obs_cbid}_bls_ordering",
+            ),
+        )
+        if bls_ordering_key is None:
+            raise RuntimeError("No antenna information available from dataset or telstate bls_ordering.")
+        ant_names = []
+        seen = set()
+        for inp_a, inp_b in telstate[bls_ordering_key]:
+            for inp in (inp_a, inp_b):
+                for pol in pols:
+                    suffix = str(pol)
+                    if inp.endswith(suffix):
+                        ant_name = inp[: -len(suffix)]
+                        if ant_name and ant_name not in seen:
+                            seen.add(ant_name)
+                            ant_names.append(ant_name)
+                        break
+        if not ant_names:
+            raise RuntimeError("Unable to derive antenna names from telstate bls_ordering.")
+        return ant_names
+
+    def _bandpass_part_count(self, telstate) -> int | None:
+        key = self._find_telstate_key(
+            telstate,
+            (
+                f"{self.obs_cbid}_product_B_parts",
+                f"{self.obs_cbid}_cal_product_B_parts",
+                "product_B_parts",
+                "cal_product_B_parts",
+            ),
+        )
+        if key is None:
+            return None
+        return int(telstate[key])
+
+    def _load_bandpass_series(self, telstate) -> list[list[tuple[object, float]]]:
+        part_count = self._bandpass_part_count(telstate)
+        series = []
+        if part_count is None:
+            part_index = 0
+            while True:
+                key = self._find_telstate_key(
+                    telstate,
+                    (
+                        f"{self.obs_cbid}_cal_product_B{part_index}",
+                        f"cal_product_B{part_index}",
+                        f"product_B{part_index}",
+                    ),
+                )
+                if key is None:
+                    break
+                values = telstate.get_range(key, st=0)
+                if not values:
+                    raise RuntimeError(f"Telstate key '{key}' returned no samples.")
+                series.append(values)
+                part_index += 1
+        else:
+            for part_index in range(part_count):
+                values = self._get_telstate_range(
+                    telstate,
+                    (
+                        f"{self.obs_cbid}_cal_product_B{part_index}",
+                        f"cal_product_B{part_index}",
+                        f"product_B{part_index}",
+                    ),
+                )
+                series.append(values)
+        if not series:
+            raise KeyError(f"No bandpass solution parts found for capture block {self.obs_cbid}.")
+        return series
+
+    def _match_solution_part(self, part_dict: dict[float, np.ndarray], target_ts: float) -> np.ndarray | None:
+        """Return the most appropriate bandpass part for ``target_ts``.
+
+        Bandpass solutions are typically much less frequent than gain solutions, so
+        the normal case is to reuse the most recent bandpass. If there is no earlier
+        sample yet, fall forward to the earliest available one.
+        """
+        if target_ts in part_dict:
+            return part_dict[target_ts]
+        if not part_dict:
+            return None
+        part_timestamps = np.asarray(sorted(part_dict.keys()), dtype=np.float64)
+        previous = part_timestamps[part_timestamps <= target_ts]
+        if len(previous):
+            return part_dict[float(previous[-1])]
+        return part_dict[float(part_timestamps[0])]
+
     def compute_cal_sols(self, clean_bandpass: bool = True, clean_maxgap_hz: float = 50.0e6, circ_pol: bool = False):
         d = self._open_dataset()
-        ant_names = [ant.name for ant in d.ants]
-        pols = d.source.telstate["cal_pol_ordering"]
+        telstate = d.source.telstate
+        pols = telstate["cal_pol_ordering"]
+        ant_names = self._antenna_names(d, telstate, pols)
         freqs = d.freqs
-        g_sols_list = d.source.telstate.get_range(self.obs_cbid + "_cal_product_G", st=0)
-        b_sols_list0 = d.source.telstate.get_range(self.obs_cbid + "_cal_product_B0", st=0)
-        b_sols_list1 = d.source.telstate.get_range(self.obs_cbid + "_cal_product_B1", st=0)
-        b_sols_list2 = d.source.telstate.get_range(self.obs_cbid + "_cal_product_B2", st=0)
-        b_sols_list3 = d.source.telstate.get_range(self.obs_cbid + "_cal_product_B3", st=0)
+        g_sols_list = self._get_telstate_range(
+            telstate,
+            (
+                f"{self.obs_cbid}_cal_product_G",
+                "cal_product_G",
+                "product_G",
+            ),
+        )
+        b_sols_parts = self._load_bandpass_series(telstate)
         ts_sols = [g_sols_list[ii][1] for ii in range(len(g_sols_list))]
         g_sols_dict = {cal_res[1]: cal_res[0] for cal_res in g_sols_list}
         b_sols_dict = {}
-        for ii_ts in range(len(ts_sols)):
-            b_sols_st = np.vstack(
-                [
-                    b_sols_list0[ii_ts][0],
-                    b_sols_list1[ii_ts][0],
-                    b_sols_list2[ii_ts][0],
-                    b_sols_list3[ii_ts][0],
-                ]
-            )
-            b_sols_dict[ts_sols[ii_ts]] = b_sols_st
+        b_sols_parts_dict = [{entry[1]: entry[0] for entry in part_series} for part_series in b_sols_parts]
+        for ts in ts_sols:
+            matched_parts = []
+            for part_dict in b_sols_parts_dict:
+                matched_part = self._match_solution_part(part_dict, ts)
+                if matched_part is None:
+                    raise RuntimeError(f"Bandpass part series is empty for timestamp {ts}.")
+                matched_parts.append(matched_part)
+            b_sols_dict[ts] = np.vstack(matched_parts)
         gb_sols: dict[float, dict[str, np.ndarray]] = {}
         for ts in ts_sols:
             gb_sols[ts] = {}
@@ -552,22 +639,28 @@ class StationCalibrator:
         if clean_bandpass:
             for ts in ts_sols:
                 gb_sols[ts] = self.clean_bandpass(gb_sols[ts], freqs, clean_maxgap_hz)
+        if len(pols) != 2:
+            raise RuntimeError(f"Expected exactly two calibration polarisations, got {pols!r}.")
+        pol0_label, pol1_label = pols
         self.G_rec_cpj = {}
         for ts in ts_sols:
             self.G_rec_cpj[ts] = {
                 ant + pol: np.abs(gb_sols[ts][ant + pol]) ** 2 for ant in ant_names for pol in pols
             }
-        k_tab = self.gain_tab / np.sqrt(len(d.ants))
+        k_tab = self.gain_tab / np.sqrt(len(ant_names))
         self.G_tab_cpj = {}
         for ts in ts_sols:
-            coh_sum_v = np.nansum(np.squeeze([gb_sols[ts][ant + "v"] for ant in ant_names]), axis=0)
-            coh_sum_h = np.nansum(np.squeeze([gb_sols[ts][ant + "h"] for ant in ant_names]), axis=0)
+            coh_sum_pol0 = np.nansum(
+                np.stack([np.atleast_1d(gb_sols[ts][ant + pol0_label]) for ant in ant_names]), axis=0
+            )
+            coh_sum_pol1 = np.nansum(
+                np.stack([np.atleast_1d(gb_sols[ts][ant + pol1_label]) for ant in ant_names]), axis=0
+            )
             if circ_pol:
-                coh_sum_pol0 = (coh_sum_v + 1j * coh_sum_h) / np.sqrt(2)
-                coh_sum_pol1 = (coh_sum_v - 1j * coh_sum_h) / np.sqrt(2)
-            else:
-                coh_sum_pol0 = coh_sum_v
-                coh_sum_pol1 = coh_sum_h
+                linear_pol0 = coh_sum_pol0
+                linear_pol1 = coh_sum_pol1
+                coh_sum_pol0 = (linear_pol0 + 1j * linear_pol1) / np.sqrt(2)
+                coh_sum_pol1 = (linear_pol0 - 1j * linear_pol1) / np.sqrt(2)
             self.G_tab_cpj[ts] = {
                 "pol0": 4 * k_tab**2 * np.abs(coh_sum_pol0) ** 2,
                 "pol1": 4 * k_tab**2 * np.abs(coh_sum_pol1) ** 2,
@@ -580,7 +673,12 @@ class StationCalibrator:
                 f_min, f_max = fc_ch - self.bw_chan / 2.0, fc_ch + self.bw_chan / 2.0
                 sel_freqs = np.logical_and(freqs >= f_min, freqs <= f_max)
                 name_pol = name_ch.split("-")[-1]
-                self.G_vlbi[ts][name_ch] = G_rs * np.nanmean(self.G_tab_cpj[ts][name_pol][sel_freqs])
+                pol_gain = np.atleast_1d(self.G_tab_cpj[ts][name_pol])
+                if pol_gain.size == freqs.size:
+                    chan_gain = np.nanmean(pol_gain[sel_freqs])
+                else:
+                    chan_gain = np.nanmean(pol_gain)
+                self.G_vlbi[ts][name_ch] = G_rs * chan_gain
 
     def write_tsys_files(self, pwr_fns: dict[str, Path]) -> dict[str, Path]:
         tsys_outputs: dict[str, Path] = {}

@@ -10,12 +10,16 @@ from typing import Sequence
 
 import katsdptelstate
 
+from .catalogue import parse_vlbi_catalogue
+from .manifest import build_scan_manifest, manifest_entries_from_catalogue, write_scan_manifest
 from .paths import default_catalogue_dir, default_metadata_dir
 from .runtime import (
     antab_product_paths,
+    build_vdif_product_metadata,
     derive_experiment_name,
     finalise_vdif_dir,
     finalise_product_dir,
+    materialise_catalogue_from_telstate,
     prepare_writing_dir,
     resolve_catalogue_path,
     write_metadata_json,
@@ -31,6 +35,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("data_dir", type=Path, help="Shared capture volume mounted by katsdpcontroller.")
     parser.add_argument("capture_block_id", help="Capture block ID for the completed observation.")
     parser.add_argument("stream_name", help="VDIF stream name for this post-processing task.")
+    parser.add_argument(
+        "--dataset-stream-name",
+        default=None,
+        help="Telstate dataset stream name for calibration products (defaults to katdal's normal resolution).",
+    )
     parser.add_argument(
         "--mode",
         choices=("antab", "pass_through", "disabled"),
@@ -114,6 +123,10 @@ def _derive_obs_params(telstate_endpoint: str, capture_block_id: str) -> dict:
     return obs_params
 
 
+def _open_capture_telstate(telstate_endpoint: str, capture_block_id: str):
+    return katsdptelstate.TelescopeState(telstate_endpoint).view(capture_block_id)
+
+
 def _metadata_payload(
     *,
     args: argparse.Namespace,
@@ -124,7 +137,12 @@ def _metadata_payload(
     status: str,
     antab_file: str | None = None,
     catalogue_file: str | None = None,
+    catalogue_sha256: str | None = None,
+    catalogue_source: str | None = None,
     rxg_file: str | None = None,
+    scan_manifest_file: str | None = None,
+    selected_scan_count: int | None = None,
+    excluded_scan_count: int | None = None,
 ) -> dict:
     payload = {
         "capture_block_id": args.capture_block_id,
@@ -146,8 +164,18 @@ def _metadata_payload(
         payload["antab_file"] = antab_file
     if catalogue_file is not None:
         payload["catalogue_file"] = catalogue_file
+    if catalogue_sha256 is not None:
+        payload["catalogue_sha256"] = catalogue_sha256
+    if catalogue_source is not None:
+        payload["catalogue_source"] = catalogue_source
     if rxg_file is not None:
         payload["rxg_file"] = rxg_file
+    if scan_manifest_file is not None:
+        payload["scan_manifest_file"] = scan_manifest_file
+    if selected_scan_count is not None:
+        payload["selected_scan_count"] = selected_scan_count
+    if excluded_scan_count is not None:
+        payload["excluded_scan_count"] = excluded_scan_count
     return payload
 
 
@@ -195,6 +223,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if paths.vdif_dir.name.endswith(".writing"):
         log.warning("Using in-progress VDIF directory because no completed directory exists yet: %s", paths.vdif_dir)
 
+    capture_telstate = _open_capture_telstate(args.telstate, args.capture_block_id) if args.telstate else None
     obs_params = _derive_obs_params(args.telstate, args.capture_block_id) if args.telstate else None
 
     if args.mode == "disabled":
@@ -204,6 +233,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.mode == "pass_through":
         experiment = derive_experiment_name(obs_params, args.experiment) if (obs_params or args.experiment) else None
         final_vdif_dir = finalise_vdif_dir(paths)
+        vdif_metadata = build_vdif_product_metadata(
+            capture_block_id=args.capture_block_id,
+            stream_name=args.stream_name,
+            obs_params=obs_params,
+            final_vdif_dir=final_vdif_dir,
+        )
+        write_metadata_json(final_vdif_dir / "metadata.json", vdif_metadata)
         metadata_payload = _metadata_payload(
             args=args,
             obs_params=obs_params,
@@ -225,13 +261,44 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     experiment = derive_experiment_name(obs_params, args.experiment)
     log.info("experiment=%s station_code=%s", experiment, args.station_code)
-    catalogue_path = resolve_catalogue_path(catalogue_dir, experiment)
+    catalogue_path = None
+    catalogue_info: dict[str, str] = {}
+    if capture_telstate is not None:
+        catalogue_path, catalogue_info = materialise_catalogue_from_telstate(
+            capture_telstate,
+            paths.writing_dir / "catalogue",
+            fallback_experiment=experiment,
+        )
+    if catalogue_path is None:
+        catalogue_path = resolve_catalogue_path(catalogue_dir, experiment)
+        catalogue_info = {
+            "catalogue_file": catalogue_path.name,
+            "catalogue_source": "packaged",
+        }
+        log.warning("Using packaged VLBI catalogue fallback for experiment %s: %s", experiment, catalogue_path)
+    catalogue = parse_vlbi_catalogue(catalogue_path)
+    manifest_entries = manifest_entries_from_catalogue(catalogue)
+    scan_manifest = build_scan_manifest(
+        manifest_entries,
+        source=f"{catalogue_info.get('catalogue_source', 'unknown')}_catalogue",
+    )
+    scan_manifest_path = paths.writing_dir / "scan_manifest.json"
+    write_scan_manifest(scan_manifest_path, scan_manifest)
+    selected_scan_count = sum(1 for entry in manifest_entries if entry.include)
+    excluded_scan_count = len(manifest_entries) - selected_scan_count
+    log.info(
+        "scan manifest written: %s selected=%d excluded=%d",
+        scan_manifest_path,
+        selected_scan_count,
+        excluded_scan_count,
+    )
     rxg_path = args.rxg if args.rxg.is_absolute() else metadata_asset_dir / args.rxg
 
     antab_path = generate_antab_from_capture(
         experiment=experiment,
         capture_block_id=args.capture_block_id,
         stream_name=args.stream_name,
+        dataset_stream_name=args.dataset_stream_name,
         telstate_endpoint=args.telstate,
         station_code=args.station_code,
         rxg_path=rxg_path,
@@ -245,6 +312,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     final_vdif_dir = finalise_vdif_dir(paths)
+    vdif_metadata = build_vdif_product_metadata(
+        capture_block_id=args.capture_block_id,
+        stream_name=args.stream_name,
+        obs_params=obs_params,
+        final_vdif_dir=final_vdif_dir,
+    )
+    write_metadata_json(final_vdif_dir / "metadata.json", vdif_metadata)
     metadata_payload = _metadata_payload(
         args=args,
         obs_params=obs_params,
@@ -253,8 +327,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         final_vdif_dir=final_vdif_dir,
         status="completed",
         antab_file=antab_path.name,
-        catalogue_file=catalogue_path.name,
+        catalogue_file=catalogue_info.get("catalogue_file", catalogue_path.name),
+        catalogue_sha256=catalogue_info.get("catalogue_sha256"),
+        catalogue_source=catalogue_info.get("catalogue_source"),
         rxg_file=rxg_path.name,
+        scan_manifest_file=scan_manifest_path.name,
+        selected_scan_count=selected_scan_count,
+        excluded_scan_count=excluded_scan_count,
     )
     write_metadata_json(paths.writing_dir / "metadata.json", metadata_payload)
     finalise_product_dir(paths)
