@@ -1,71 +1,176 @@
 # vlbimeta
 
-VLBI post-processing utilities plus a controller-facing entrypoint for `katsdpcontroller`.
+`vlbimeta` is the online VLBI post-processing product for `katsdpcontroller`.
 
-## Intended Role
+It replaces the older offline metadata notebooks and scripts. It is expected to
+run as a scheduled postprocess task after `vlbi.<stream>` has finished recording,
+on the same host as the recorder, with access to the local recorder output and
+the live capture-block telstate.
 
-`vlbimeta` is the scheduled post-processing step for VLBI captures.
+## Role
 
-The intended production path is:
+`vlbimeta` owns the science-facing VLBI product assembly after capture.
 
-1. `katgpucbf` V-engine produces the VLBI voltage stream and computes per-thread mean power during capture.
-2. Those mean-power values are persisted in telstate.
-3. `vlbimeta` runs after `vlbi.sdp_vdif` completes, reads the completed capture product plus telstate metadata, and writes ingest-facing / science-facing metadata products.
+It should:
 
-Important clarification:
+- consume the completed or staged VDIF recorder product for one capture block
+- consume observation metadata and sensor histories from capture-block telstate
+- consume calibration products from the calibrated SDP stream when `antab` is enabled
+- finalise product directories and write ingest/product metadata
+- generate ANTAB, UVFLG, observation-log, and scan-manifest products
+- eventually rewrite the raw full-session VDIF recording into a science-only VDIF product
 
-- the old standalone workflow generated `vdif` and power outputs from saved raw beam-voltage files
-- that is no longer the intended operational model here
-- `vlbimeta` should not expect raw beam-voltage files to be present in postprocessing
-- the primary power source for MVP work is telstate mean-power written during capture
+It should not:
 
-## MVP Scope
+- expect historical raw beam-voltage files to exist
+- download archived RDB files as the normal production path
+- query the CAM archive as its normal production source of truth
+- silently fall back to full-session pass-through when a requested science product cannot be made
 
-Current MVP target:
+The online contract is important: if a product needs a time history, that history
+must either already be present in capture-block telstate or be mirrored there
+during capture.
 
-- consume the completed VLBI capture product for one capture block
-- read mean-power from telstate as the primary source
-- generate `antab`
-- generate per-product `metadata.json`
+## Product Census
 
-Implemented local-development path:
+### Product finalisation
 
-- `vlbimeta` can also run in `pass_through` mode
-- this finalises the VDIF product directory and writes a metadata-only postprocess product
-- it is intended for environments where calibration is not available
+Input:
 
-Deferred for now:
+- `<data_dir>/<cbid>_vdif.writing` or `<data_dir>/<cbid>_vdif`
+- capture-block `obs_params`
+- stream name, normally `sdp_vdif`
 
-- `uvflag`
-- observation log extraction
-- any dependency on historical raw beam-voltage files
+Output:
 
-Fallback / debug path:
+- final `<data_dir>/<cbid>_vdif`
+- `<data_dir>/<cbid>_vdif/metadata.json`
+- `<data_dir>/<cbid>_antab/metadata.json`
 
-- power can also be recomputed from final VDIF voltage samples
-- this is useful for validation or recovery
-- it is not the primary operational source of truth
+### Scan manifest
 
-## Calibration Requirement
+The scan manifest should become the common selection contract for ANTAB, UVFLG,
+observation logs, and science-only VDIF rewriting.
 
-The current `antab` implementation assumes MeerKAT tied-array calibration
-products are available.
+Input:
 
-In practice this means:
+- scan start and stop times
+- target names
+- scan tags or classes
+- catalogue metadata for provenance and cross-checking
 
-- telstate mean-power on its own is not enough
-- `vlbimeta` expects calibration products equivalent to `katsdpcal` output
-- the localhost sandbox `sim_vlbi_local.cfg` path does not currently launch `katsdpcal`
-- therefore localhost can validate task plumbing and `pass_through`, but not calibrated `ANTAB`
+Output:
 
-Recommended operational policy:
+- `scan_manifest.json`
 
-- `antab` mode should require calibration and fail clearly if it is absent
-- `pass_through` mode is the intended local development fallback
+The first manifest schema should stay small:
 
-## Controller Entrypoint (Current Contract)
+- `scan_id`
+- `start_time`
+- `end_time`
+- `target_name`
+- `tags`
+- `include`
+- `reason`
 
-The container/runtime entrypoint expected by `katsdpcontroller` is:
+### ANTAB
+
+ANTAB generation converts VLBI mean-power histories into calibrated Tsys-style
+ANTAB output.
+
+Input:
+
+- per-thread mean-power histories, currently expected as:
+  - `sdp_vdif.x0.mean-power`
+  - `sdp_vdif.y0.mean-power`
+  - `sdp_vdif.x1.mean-power`
+  - `sdp_vdif.y1.mean-power`
+- calibration products from the calibrated stream, normally `sdp_l0`
+  - `cal_pol_ordering`
+  - `cal_product_G` or `<cbid>_cal_product_G`
+  - `product_B_parts` / `cal_product_B_parts`
+  - `product_B0`, `product_B1`, ... or `<cbid>_cal_product_B0`, ...
+  - antenna names from katdal or `bls_ordering`
+  - calibrated stream frequency grid
+- catalogue or equivalent structured metadata:
+  - experiment name
+  - scan names and scan windows
+  - target names
+  - channel centre frequencies, sidebands, bandwidths, and polarisation mapping
+- station metadata:
+  - station code
+  - RXG data for DPFU, gain, Tcal, Trec, and spillover
+
+Output:
+
+- `<experiment><station>.antab`
+- per-scan Tsys CSV files
+- ANTAB provenance in `metadata.json`
+
+### UVFLG
+
+UVFLG generation is the online replacement for the flagging part of
+`ipynb/log_uvflg_gen_rev2.ipynb`.
+
+Input:
+
+- scan manifest or catalogue-derived science scan windows
+- expected target for each selected scan
+- antenna list
+- per-antenna activity histories, equivalent to `<ant>_activity`
+- per-antenna target histories, equivalent to `<ant>_target`
+- station code
+- quorum policy, currently `0.90`
+- flag time resolution, currently `1 s`
+
+Output:
+
+- `<experiment><station>.uvflg`
+
+The notebook marked data invalid when fewer than the quorum of antennas reported
+`track`, or when fewer than the quorum of antennas reported the expected target.
+The production implementation should preserve that policy, but should consume
+online telstate histories rather than the CAM archive.
+
+### Observation log
+
+Observation-log generation is the online replacement for the log part of
+`ipynb/log_uvflg_gen_rev2.ipynb`.
+
+Input:
+
+- observation script log history, equivalent to the archived `obs_script_log`
+- scan/log time axis from the manifest
+- time-reference sensor histories, currently `tfrmon_tfr_ktt_utcza`
+- sensor reporting interval, currently `60 s`
+
+Output:
+
+- `<experiment><station>.log`
+
+### Science-only VDIF
+
+The recorder captures the full VLBI session. The final delivered science VDIF
+should eventually be rewritten from that raw staging output using the scan
+manifest.
+
+Input:
+
+- raw VDIF staging directory
+- scan manifest
+- VDIF frame timestamps
+
+Output:
+
+- science-only VDIF product
+- provenance linking the raw staging product to the final science product
+
+The first implementation should use `baseband` for correctness before optimising
+large-file throughput.
+
+## Controller Entrypoint
+
+The runtime entrypoint expected by `katsdpcontroller` is:
 
 `vlbimeta.py <data_dir> <capture_block_id> <stream_name> [--mode antab|pass_through|disabled]`
 
@@ -80,27 +185,65 @@ Current behaviour:
   - `disabled`
 - in `pass_through` mode:
   - finalises `<cbid>_vdif.writing` to `<cbid>_vdif`
+  - writes `<cbid>_vdif/metadata.json` as a first-pass DLM `VDIFProduct`
   - writes `<cbid>_antab/metadata.json`
   - exits successfully without generating calibrated `ANTAB`
 
-Remaining `antab`-mode contract work:
+Current preferred layout is top-level under `data_dir`:
 
-- the canonical mean-power sensor naming / thread ordering
-- the calibration source contract for tied-array VLBI
-- the final success/failure policy when calibration is absent
+- `<data_dir>/<cbid>_vdif.writing`
+- `<data_dir>/<cbid>_vdif`
+- `<data_dir>/<cbid>_antab.writing`
+- `<data_dir>/<cbid>_antab`
 
-## Package Layout
+`vlbimeta` still accepts the older nested `<data_dir>/<cbid>/...` layout for
+compatibility with earlier captures.
+
+## Current State
+
+Implemented:
+
+- controller-facing `vlbimeta` entrypoint
+- `pass_through` finalisation path
+- metadata-only product output for `pass_through`
+- telstate materialisation of the per-observation catalogue when present
+- ANTAB prototype using telstate mean-power and calibrated-stream products
+- fallback/debug tools for recomputing power from VDIF
+
+Still to clean up:
+
+- split notebook-derived logic into package modules instead of interactive scripts
+- make the scan manifest the shared selection contract
+- make UVFLG and observation-log generation consume online telstate histories
+- define strict failure behaviour for missing online histories
+- remove packaged catalogues from the production path
+- align `metadata.json`, ANTAB, UVFLG, logs, and future VDIF filtering around the same scan selection
+
+## Source Structure Direction
+
+The package should be cleaned up around product responsibilities:
+
+- `controller_entrypoint.py`: argument parsing, product orchestration, failure policy
+- `runtime.py`: filesystem layout, metadata helpers, telstate materialisation
+- `catalogue.py`: VLBI catalogue parsing and validation
+- `manifest.py`: scan manifest generation and selection policy
+- `antab.py`: ANTAB generation from mean-power, calibration, and scan metadata
+- `uvflg.py`: UVFLG generation from antenna activity/target histories
+- `obslog.py`: observation-log extraction and sensor-log insertion
+- `vdif_rewrite.py`: science-only VDIF rewrite from manifest windows
+
+The old notebooks under `ipynb/` should be treated as reference material for
+algorithms and output formats, not as production source.
+
+## Console Entry Points
 
 Python code lives under `src/vlbimeta/` and is installable via `pyproject.toml`.
-Console entry points are provided for:
+Console entry points currently include:
 
-- `vlbimeta` / `vlbimeta.py` (controller-facing product)
+- `vlbimeta` / `vlbimeta.py`
 - `vdif-power-summary`
 - `vdif-power-antab`
 - `telstate-antab-from-mean-power`
 
-Current status of these entry points:
-
-- `vlbimeta` is the scheduled controller entrypoint and supports a metadata-only `pass_through` path
-- `telstate-antab-from-mean-power` is the closest prototype to the intended calibrated `ANTAB` data path
-- `vdif-power-summary` and `vdif-power-antab` remain useful as fallback/debug tooling and for validation against telstate-derived power
+The controller-facing `vlbimeta` entrypoint is the production path. The other
+entry points are currently fallback, debugging, or migration aids.

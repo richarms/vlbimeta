@@ -17,6 +17,7 @@ import katdal
 import katsdptelstate
 
 from .runtime import default_mean_power_sensor_keys
+from .runtime import candidate_mean_power_sensor_key_sets
 from .vdif_power_antab import (
     AntabWriter,
     StationCalibrator,
@@ -358,8 +359,17 @@ def generate_antab_from_capture(
     calibrator.compute_cal_sols(circ_pol=apply_l2c_conversion)
 
     channel_order = build_thread_mapping(fc_chans)
-    sensor_keys = default_mean_power_sensor_keys(stream_name, channel_order, sensor_pols=sensor_pols)
-    sensor_series = load_mean_power_from_keys(telstate, sensor_keys)
+    last_error: KeyError | None = None
+    sensor_series = None
+    for sensor_keys in candidate_mean_power_sensor_key_sets(stream_name, channel_order, sensor_pols=sensor_pols):
+        try:
+            sensor_series = load_mean_power_from_keys(telstate, sensor_keys)
+            break
+        except KeyError as exc:
+            last_error = exc
+    if sensor_series is None:
+        assert last_error is not None
+        raise last_error
     antab_scans = [scan_name for scan_name in scan_data.keys() if scan_name.startswith("scan No")]
     if not antab_scans:
         raise RuntimeError("No scans matching 'scan No*' found in the catalogue for ANTAB generation.")
