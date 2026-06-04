@@ -117,8 +117,8 @@ Input:
 - scan manifest or catalogue-derived science scan windows
 - expected target for each selected scan
 - antenna list
-- per-antenna activity histories, equivalent to `<ant>_activity`
-- per-antenna target histories, equivalent to `<ant>_target`
+- per-antenna activity histories, currently `<ant>_activity`
+- per-antenna target histories, currently `<ant>_target`
 - station code
 - quorum policy, currently `0.90`
 - flag time resolution, currently `1 s`
@@ -139,7 +139,7 @@ Observation-log generation is the online replacement for the log part of
 
 Input:
 
-- observation script log history, equivalent to the archived `obs_script_log`
+- observation script log history, currently `obs_script_log`
 - scan/log time axis from the manifest
 - time-reference sensor histories, currently `tfrmon_tfr_ktt_utcza`
 - sensor reporting interval, currently `60 s`
@@ -207,6 +207,7 @@ Implemented:
 - `pass_through` finalisation path
 - metadata-only product output for `pass_through`
 - telstate materialisation of the per-observation catalogue when present
+- online telstate input helpers for future UVFLG/log products
 - ANTAB prototype using telstate mean-power and calibrated-stream products
 - fallback/debug tools for recomputing power from VDIF
 
