@@ -117,8 +117,8 @@ Input:
 - scan manifest or catalogue-derived science scan windows
 - expected target for each selected scan
 - antenna list
-- per-antenna activity histories, equivalent to `<ant>_activity`
-- per-antenna target histories, equivalent to `<ant>_target`
+- per-antenna activity histories, currently `<ant>_activity`
+- per-antenna target histories, currently `<ant>_target`
 - station code
 - quorum policy, currently `0.90`
 - flag time resolution, currently `1 s`
@@ -139,7 +139,7 @@ Observation-log generation is the online replacement for the log part of
 
 Input:
 
-- observation script log history, equivalent to the archived `obs_script_log`
+- observation script log history, currently `obs_script_log`
 - scan/log time axis from the manifest
 - time-reference sensor histories, currently `tfrmon_tfr_ktt_utcza`
 - sensor reporting interval, currently `60 s`
@@ -207,6 +207,8 @@ Implemented:
 - `pass_through` finalisation path
 - metadata-only product output for `pass_through`
 - telstate materialisation of the per-observation catalogue when present
+- online telstate input helpers for future UVFLG/log products
+- pure UVFLG evaluation and rendering from scan manifest plus antenna histories
 - ANTAB prototype using telstate mean-power and calibrated-stream products
 - fallback/debug tools for recomputing power from VDIF
 
@@ -214,7 +216,7 @@ Still to clean up:
 
 - split notebook-derived logic into package modules instead of interactive scripts
 - make the scan manifest the shared selection contract
-- make UVFLG and observation-log generation consume online telstate histories
+- wire UVFLG and observation-log generation into the controller runtime
 - define strict failure behaviour for missing online histories
 - remove packaged catalogues from the production path
 - align `metadata.json`, ANTAB, UVFLG, logs, and future VDIF filtering around the same scan selection
