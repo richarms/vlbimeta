@@ -14,17 +14,17 @@ from .catalogue import parse_vlbi_catalogue
 from .manifest import build_scan_manifest, manifest_entries_from_catalogue, write_scan_manifest
 from .paths import default_catalogue_dir, default_metadata_dir
 from .runtime import (
-    antab_product_paths,
     build_vdif_product_metadata,
     derive_experiment_name,
-    finalise_vdif_dir,
-    finalise_product_dir,
+    finalise_products,
     materialise_catalogue_from_telstate,
     prepare_writing_dir,
+    product_paths,
+    read_capture_manifest,
     resolve_catalogue_path,
+    stage_vdif_product,
     write_metadata_json,
 )
-from .telstate_antab_from_mean_power import generate_antab_from_capture
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -159,6 +159,8 @@ def _metadata_payload(
         "stream_name": args.stream_name,
         "task_name": args.name,
         "telstate_endpoint": args.telstate,
+        "handoff_version": 1,
+        "vdif_selection": "full_capture",
     }
     if antab_file is not None:
         payload["antab_file"] = antab_file
@@ -187,6 +189,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     log = logging.getLogger("vlbimeta")
 
+    if args.mode == "disabled":
+        log.info("vlbimeta mode is disabled; exiting without producing a product")
+        return 0
+
     data_dir = args.data_dir.resolve()
     if not data_dir.exists():
         raise FileNotFoundError(f"Data directory does not exist: {data_dir}")
@@ -196,13 +202,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     catalogue_dir = (args.catalogue_dir or default_catalogue_dir()).resolve()
     metadata_asset_dir = (args.metadata_dir or default_metadata_dir()).resolve()
     sensor_pols = _parse_sensor_pols(args.sensor_pols)
-    paths = antab_product_paths(data_dir, args.capture_block_id)
-
-    if paths.final_dir.exists():
-        log.info("ANTAB product already exists, leaving in place: %s", paths.final_dir)
-        return 0
+    paths = product_paths(data_dir, args.capture_block_id, args.stream_name)
+    capture_manifest = read_capture_manifest(paths)
 
     prepare_writing_dir(paths)
+    write_metadata_json(paths.writing_dir / "capture.json", capture_manifest)
     log.info("vlbimeta entrypoint invoked")
     log.info(
         "task_name=%s capture_block_id=%s stream_name=%s mode=%s",
@@ -215,41 +219,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     log.info("metadata_asset_dir=%s", metadata_asset_dir)
     log.info("capture_root=%s", paths.capture_root)
     log.info("vdif_dir=%s", paths.vdif_dir)
-    log.info("antab_writing_dir=%s", paths.writing_dir)
+    log.info("metadata_writing_dir=%s", paths.writing_dir)
     if not catalogue_dir.exists():
         log.warning("Catalogue directory not found yet: %s", catalogue_dir)
     if not metadata_asset_dir.exists():
         log.warning("Metadata asset directory not found yet: %s", metadata_asset_dir)
-    if paths.vdif_dir.name.endswith(".writing"):
-        log.warning("Using in-progress VDIF directory because no completed directory exists yet: %s", paths.vdif_dir)
 
     capture_telstate = _open_capture_telstate(args.telstate, args.capture_block_id) if args.telstate else None
     obs_params = _derive_obs_params(args.telstate, args.capture_block_id) if args.telstate else None
 
-    if args.mode == "disabled":
-        log.info("vlbimeta mode is disabled; exiting without producing a product")
-        return 0
-
     if args.mode == "pass_through":
         experiment = derive_experiment_name(obs_params, args.experiment) if (obs_params or args.experiment) else None
-        final_vdif_dir = finalise_vdif_dir(paths)
+        staged_vdif_dir = stage_vdif_product(paths)
         vdif_metadata = build_vdif_product_metadata(
             capture_block_id=args.capture_block_id,
             stream_name=args.stream_name,
             obs_params=obs_params,
-            final_vdif_dir=final_vdif_dir,
+            final_vdif_dir=staged_vdif_dir,
         )
-        write_metadata_json(final_vdif_dir / "metadata.json", vdif_metadata)
+        write_metadata_json(staged_vdif_dir / "metadata.json", vdif_metadata)
         metadata_payload = _metadata_payload(
             args=args,
             obs_params=obs_params,
             experiment=experiment,
             input_vdif_dir=paths.vdif_dir,
-            final_vdif_dir=final_vdif_dir,
+            final_vdif_dir=paths.final_vdif_dir,
             status="pass_through",
         )
         write_metadata_json(paths.writing_dir / "metadata.json", metadata_payload)
-        finalise_product_dir(paths)
+        finalise_products(paths)
         log.info("Pass-through product completed: %s", paths.final_dir)
         return 0
 
@@ -294,6 +292,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     rxg_path = args.rxg if args.rxg.is_absolute() else metadata_asset_dir / args.rxg
 
+    from .telstate_antab_from_mean_power import generate_antab_from_capture
+
     antab_path = generate_antab_from_capture(
         experiment=experiment,
         capture_block_id=args.capture_block_id,
@@ -311,20 +311,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         time_buffer=args.time_buffer,
     )
 
-    final_vdif_dir = finalise_vdif_dir(paths)
+    staged_vdif_dir = stage_vdif_product(paths)
     vdif_metadata = build_vdif_product_metadata(
         capture_block_id=args.capture_block_id,
         stream_name=args.stream_name,
         obs_params=obs_params,
-        final_vdif_dir=final_vdif_dir,
+        final_vdif_dir=staged_vdif_dir,
     )
-    write_metadata_json(final_vdif_dir / "metadata.json", vdif_metadata)
+    write_metadata_json(staged_vdif_dir / "metadata.json", vdif_metadata)
     metadata_payload = _metadata_payload(
         args=args,
         obs_params=obs_params,
         experiment=experiment,
         input_vdif_dir=paths.vdif_dir,
-        final_vdif_dir=final_vdif_dir,
+        final_vdif_dir=paths.final_vdif_dir,
         status="completed",
         antab_file=antab_path.name,
         catalogue_file=catalogue_info.get("catalogue_file", catalogue_path.name),
@@ -336,7 +336,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         excluded_scan_count=excluded_scan_count,
     )
     write_metadata_json(paths.writing_dir / "metadata.json", metadata_payload)
-    finalise_product_dir(paths)
+    finalise_products(paths)
     log.info("ANTAB product completed: %s", paths.final_dir)
     return 0
 
