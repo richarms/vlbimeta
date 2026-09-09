@@ -13,7 +13,7 @@ the live capture-block telstate.
 
 It should:
 
-- consume the completed or staged VDIF recorder product for one capture block
+- consume only a recorder-closed raw VDIF capture for one capture block and stream
 - consume observation metadata and sensor histories from capture-block telstate
 - consume calibration products from the calibrated SDP stream when `antab` is enabled
 - finalise product directories and write ingest/product metadata
@@ -35,17 +35,23 @@ during capture.
 
 ### Product finalisation
 
+The version-1 [recorder handoff contract](docs/handoff.md) defines the exact paths,
+closure record, validation rules, and ownership on both sides.
+
 Input:
 
-- `<data_dir>/<cbid>_vdif.writing` or `<data_dir>/<cbid>_vdif`
+- `<data_dir>/.vlbi/<cbid>/<stream>/raw/`, including `capture.json`
 - capture-block `obs_params`
-- stream name, normally `sdp_vdif`
+- explicit stream name, normally `sdp_vdif`
 
 Output:
 
-- final `<data_dir>/<cbid>_vdif`
-- `<data_dir>/<cbid>_vdif/metadata.json`
-- `<data_dir>/<cbid>_antab/metadata.json`
+- `<data_dir>/<cbid>_<stream>.vdif/`, with VDIF shards and DLM `metadata.json`
+- `<data_dir>/<cbid>_<stream>.metadata/`, with companion products and provenance
+
+Each output is assembled with a `.writing` suffix before publication. Raw input
+is retained; current full-capture output uses hard links on the same filesystem.
+`raw.writing` and the old flat/nested `_vdif` layouts are never consumed.
 
 ### Scan manifest
 
@@ -176,35 +182,28 @@ The runtime entrypoint expected by `katsdpcontroller` is:
 
 Current behaviour:
 
-- resolves capture/product directories from `data_dir`
-- accepts `--telstate` from `katsdpcontroller`
-- derives experiment metadata from telstate `obs_params`
-- supports explicit modes:
-  - `antab`
-  - `pass_through`
-  - `disabled`
-- in `pass_through` mode:
-  - finalises `<cbid>_vdif.writing` to `<cbid>_vdif`
-  - writes `<cbid>_vdif/metadata.json` as a first-pass DLM `VDIFProduct`
-  - writes `<cbid>_antab/metadata.json`
-  - exits successfully without generating calibrated `ANTAB`
+- accepts `--telstate` from `katsdpcontroller` and derives observation context
+- requires the exact stream-specific closed raw path and version-1 capture inventory
+- verifies capture identity, shard names, non-empty inventory, and recorded sizes
+- builds `.vdif.writing` and `.metadata.writing` outputs without changing raw input
+- writes product metadata before renaming VDIF output, then companion output
+- in `pass_through`, publishes full-capture VDIF and provenance without ANTAB
+- in `antab`, also generates the current ANTAB and catalogue-derived manifest;
+  VDIF is still full-capture, explicitly recorded in provenance
+- in `disabled`, exits without requiring input or creating output
+- rejects existing final or unfinished outputs with an explicit recovery error
 
-Current preferred layout is top-level under `data_dir`:
-
-- `<data_dir>/<cbid>_vdif.writing`
-- `<data_dir>/<cbid>_vdif`
-- `<data_dir>/<cbid>_antab.writing`
-- `<data_dir>/<cbid>_antab`
-
-`vlbimeta` still accepts the older nested `<data_dir>/<cbid>/...` layout for
-compatibility with earlier captures.
+This removes the old "existing ANTAB directory means success" behaviour. Full
+retry/resume and mode-upgrade policy is still to be implemented. Older captures
+need an explicit migration procedure; runtime path guessing has been removed.
 
 ## Current State
 
 Implemented:
 
 - controller-facing `vlbimeta` entrypoint
-- `pass_through` finalisation path
+- version-1 closed-capture handoff and stream-specific output paths
+- `pass_through` publication while retaining raw input
 - metadata-only product output for `pass_through`
 - telstate materialisation of the per-observation catalogue when present
 - online telstate input helpers for future UVFLG/log products
@@ -262,3 +261,17 @@ Console entry points currently include:
 
 The controller-facing `vlbimeta` entrypoint is the production path. The other
 entry points are currently fallback, debugging, or migration aids.
+
+## Cross-repository handoff test
+
+With `katsdpvlbi` checked out alongside this repository and `aiokatcp` installed
+in the test environment:
+
+```bash
+KATSDPVLBI_SOURCE=../katsdpvlbi .venv/bin/python -m pytest tests/test_recorder_handoff.py
+```
+
+This exercises the real proxy lifecycle and postprocessor with simulated jive5ab
+responses and payload files. It validates the filesystem handoff, not VDIF or
+science-output correctness. Package-local contract tests run without the sibling
+checkout; the cross-repository test is skipped unless the variable is set.

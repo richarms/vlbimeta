@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,11 +19,12 @@ VLBI_CATALOGUE_FORMAT_KEY = "vlbi_catalogue_format"
 
 
 @dataclass(frozen=True)
-class AntabProductPaths:
-    """Filesystem layout for one ANTAB postprocessing product."""
+class VlbiProductPaths:
+    """Version 1 recorder handoff and stream-specific published products."""
 
     capture_root: Path
     vdif_dir: Path
+    vdif_writing_dir: Path
     final_vdif_dir: Path
     writing_dir: Path
     final_dir: Path
@@ -33,41 +36,27 @@ class AntabProductPaths:
         return self.final_dir.exists() and self.final_dir.is_dir() and self.metadata_path.exists()
 
 
-def resolve_capture_root(data_dir: Path, capture_block_id: str) -> Path:
-    legacy_capture_root = data_dir / capture_block_id
-    if legacy_capture_root.exists():
-        if not legacy_capture_root.is_dir():
-            raise NotADirectoryError(f"Expected capture root directory: {legacy_capture_root}")
-        return legacy_capture_root
-    if not data_dir.exists():
-        raise FileNotFoundError(f"Data directory does not exist: {data_dir}")
-    if not data_dir.is_dir():
-        raise NotADirectoryError(f"Expected data directory: {data_dir}")
-    return data_dir
+def validate_path_component(value: str) -> str:
+    """Use the same identifier grammar as the recorder handoff contract."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", value) or ".." in value:
+        raise ValueError(f"Invalid capture/stream identifier: {value!r}")
+    return value
 
 
-def resolve_vdif_input_dir(capture_root: Path, capture_block_id: str) -> Path:
-    preferred = capture_root / f"{capture_block_id}_vdif"
-    fallback = capture_root / f"{capture_block_id}_vdif.writing"
-    if preferred.exists():
-        if not preferred.is_dir():
-            raise NotADirectoryError(f"Expected completed VDIF directory: {preferred}")
-        return preferred
-    if fallback.exists():
-        if not fallback.is_dir():
-            raise NotADirectoryError(f"Expected in-progress VDIF directory: {fallback}")
-        return fallback
-    raise FileNotFoundError(f"Could not find either completed or in-progress VDIF product under {capture_root}")
-
-
-def antab_product_paths(data_dir: Path, capture_block_id: str) -> AntabProductPaths:
-    capture_root = resolve_capture_root(data_dir, capture_block_id)
-    writing_dir = capture_root / f"{capture_block_id}_antab.writing"
-    final_dir = capture_root / f"{capture_block_id}_antab"
-    return AntabProductPaths(
+def product_paths(data_dir: Path, capture_block_id: str, stream_name: str) -> VlbiProductPaths:
+    if not re.fullmatch(r"[0-9]+", capture_block_id):
+        raise ValueError(f"Invalid capture block ID (decimal digits required): {capture_block_id!r}")
+    cbid = capture_block_id
+    stream = validate_path_component(stream_name)
+    capture_root = data_dir / ".vlbi" / cbid / stream
+    basename = f"{cbid}_{stream}"
+    writing_dir = data_dir / f"{basename}.metadata.writing"
+    final_dir = data_dir / f"{basename}.metadata"
+    return VlbiProductPaths(
         capture_root=capture_root,
-        vdif_dir=resolve_vdif_input_dir(capture_root, capture_block_id),
-        final_vdif_dir=capture_root / f"{capture_block_id}_vdif",
+        vdif_dir=capture_root / "raw",
+        vdif_writing_dir=data_dir / f"{basename}.vdif.writing",
+        final_vdif_dir=data_dir / f"{basename}.vdif",
         writing_dir=writing_dir,
         final_dir=final_dir,
         tsys_dir=writing_dir / "tsys",
@@ -75,37 +64,87 @@ def antab_product_paths(data_dir: Path, capture_block_id: str) -> AntabProductPa
     )
 
 
-def prepare_writing_dir(paths: AntabProductPaths) -> None:
-    paths.writing_dir.mkdir(parents=True, exist_ok=True)
-    paths.tsys_dir.mkdir(parents=True, exist_ok=True)
+def read_capture_manifest(paths: VlbiProductPaths) -> dict[str, Any]:
+    """Require a recorder-closed capture with an exact, non-empty shard inventory.
+
+    No legacy path discovery or recovery of raw.writing is performed here. Sizes
+    detect truncated/changed files; this is not a VDIF payload integrity check.
+    """
+    if (paths.capture_root / "raw.writing").exists():
+        raise ValueError(f"Capture is unfinished or ambiguous: {paths.capture_root}")
+    if paths.vdif_dir.is_symlink() or not paths.vdif_dir.is_dir():
+        raise FileNotFoundError(f"Closed raw capture required: {paths.vdif_dir}")
+    manifest_path = paths.vdif_dir / "capture.json"
+    if manifest_path.is_symlink():
+        raise ValueError(f"Capture manifest must be a regular file: {manifest_path}")
+    with manifest_path.open(encoding="utf-8") as stream:
+        manifest = json.load(stream)
+    cbid = paths.capture_root.parent.name
+    stream_name = paths.capture_root.name
+    expected = {"version": 1, "capture_block_id": cbid, "stream_name": stream_name, "status": "closed"}
+    if (
+        not isinstance(manifest, dict)
+        or type(manifest.get("version")) is not int
+        or any(manifest.get(key) != value for key, value in expected.items())
+    ):
+        raise ValueError(f"Invalid capture identity, status or handoff version: {manifest_path}")
+    shards = manifest.get("shards")
+    if not isinstance(shards, list) or not shards:
+        raise ValueError("Closed capture must contain at least one shard")
+    names: set[str] = set()
+    for shard in shards:
+        if not isinstance(shard, dict):
+            raise ValueError("Invalid capture shard entry")
+        name, size = shard.get("name"), shard.get("size_bytes")
+        if not isinstance(name, str) or not re.fullmatch(re.escape(f"{cbid}_{stream_name}") + r"\.[0-9]+", name):
+            raise ValueError(f"Invalid capture shard name: {name!r}")
+        if name in names or type(size) is not int or size <= 0:
+            raise ValueError(f"Duplicate or empty capture shard: {name}")
+        names.add(name)
+        path = paths.vdif_dir / name
+        if path.is_symlink() or not path.is_file() or path.stat().st_size != size:
+            raise ValueError(f"Capture shard missing or changed: {path}")
+    if {path.name for path in paths.vdif_dir.iterdir()} != names | {"capture.json"}:
+        raise ValueError(f"Capture inventory does not match directory: {paths.vdif_dir}")
+    return manifest
 
 
-def finalise_product_dir(paths: AntabProductPaths) -> None:
-    if paths.final_dir.exists():
-        return
+def prepare_writing_dir(paths: VlbiProductPaths) -> None:
+    """Reserve fresh output directories; never interpret an old output as success."""
+    for path in (paths.final_dir, paths.final_vdif_dir, paths.writing_dir, paths.vdif_writing_dir):
+        if path.exists() or path.is_symlink():
+            raise FileExistsError(f"Output already exists; explicit recovery is required: {path}")
+    paths.writing_dir.mkdir()
+    paths.vdif_writing_dir.mkdir()
+    paths.tsys_dir.mkdir()
+
+
+def stage_vdif_product(paths: VlbiProductPaths) -> Path:
+    """Hard-link full-capture shards into unpublished output, preserving raw input.
+
+    Both paths must be on the same filesystem. Shards are immutable after capture;
+    future VDIF filtering must write new files, never overwrite these links.
+    """
+    manifest = read_capture_manifest(paths)
+    for shard in manifest["shards"]:
+        os.link(paths.vdif_dir / shard["name"], paths.vdif_writing_dir / shard["name"])
+    return paths.vdif_writing_dir
+
+
+def finalise_products(paths: VlbiProductPaths) -> None:
+    """Publish VDIF first and its companion product last, with metadata in place.
+
+    These are two atomic renames, not a transaction across both products. A failure
+    between them leaves explicit incomplete state for subsequent recovery work.
+    """
+    for path in (paths.final_vdif_dir, paths.final_dir):
+        if path.exists() or path.is_symlink():
+            raise FileExistsError(f"Refusing to overwrite published product: {path}")
+    for path in (paths.vdif_writing_dir, paths.writing_dir):
+        if not (path / "metadata.json").is_file():
+            raise FileNotFoundError(f"Cannot publish product without metadata: {path}")
+    paths.vdif_writing_dir.rename(paths.final_vdif_dir)
     paths.writing_dir.rename(paths.final_dir)
-
-
-def _collapse_nested_vdif_dir(source_dir: Path, final_basename: str) -> None:
-    nested_dir = source_dir / final_basename
-    if not nested_dir.is_dir():
-        return
-    for child in nested_dir.iterdir():
-        destination = source_dir / child.name
-        if destination.exists():
-            raise FileExistsError(f"Refusing to overwrite existing path while flattening VDIF output: {destination}")
-        child.rename(destination)
-    nested_dir.rmdir()
-
-
-def finalise_vdif_dir(paths: AntabProductPaths) -> Path:
-    if paths.final_vdif_dir.exists():
-        return paths.final_vdif_dir
-    if paths.vdif_dir == paths.final_vdif_dir:
-        return paths.final_vdif_dir
-    _collapse_nested_vdif_dir(paths.vdif_dir, paths.final_vdif_dir.name)
-    paths.vdif_dir.rename(paths.final_vdif_dir)
-    return paths.final_vdif_dir
 
 
 def write_metadata_json(output_path: Path, payload: Mapping[str, Any]) -> None:
@@ -141,7 +180,7 @@ def shard_file_sizes(final_vdif_dir: Path) -> list[int]:
     shard_paths = sorted(
         path
         for path in final_vdif_dir.iterdir()
-        if path.is_file() and path.name != "metadata.json"
+        if path.is_file() and re.fullmatch(r".+\.[0-9]+", path.name)
     )
     return [path.stat().st_size for path in shard_paths]
 
