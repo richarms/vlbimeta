@@ -55,8 +55,11 @@ scan name to `<cbid>_<stream>`. jive5ab may temporarily nest that scan directory
 inside `raw.writing`; only the recorder flattens it after stopping.
 
 On capture-done the recorder requires a successful stop response, or the explicit
-already-stopped response (code 6, `Not doing record`). Ambiguous code 1 is an error;
-it no longer qualifies as evidence that it is safe to publish the handoff.
+already-stopped response (code 6, `Not doing record`). For code 1, as observed
+with the pinned jive5ab build, it polls `record?` for up to ten seconds and
+requires an explicit `off` response before proceeding. Code 1 by itself never
+qualifies as evidence that it is safe to publish the handoff. A failed query,
+unexpected state, or timeout leaves the capture unfinished.
 The recorder then validates a non-empty set of non-empty, regular shard files,
 writes `capture.json`, and renames `raw.writing` to `raw` on the same filesystem.
 The rename is the handoff boundary. Raw shards must not be modified afterward.
