@@ -56,9 +56,9 @@ def test_legacy_scan_dict_matches_antab_shape(tmp_path):
 def test_scan_class_uses_catalogue_prefixes():
     obs_params = {"CAL_PREFIX": "scan cal", "PCC_PREFIX": "mpcc"}
 
-    assert scan_class("scan cal00", obs_params) == "calibrator"
-    assert scan_class("mpcc No0001", obs_params) == "pcc"
-    assert scan_class("scan No0001", obs_params) == "science"
+    assert scan_class("scan cal00", obs_params) == "local_calibration"
+    assert scan_class("mpcc No0001", obs_params) == "local_phase_up"
+    assert scan_class("scan No0001", obs_params) == "scheduled"
     assert scan_class("setup", obs_params) == "other"
 
 
@@ -70,9 +70,9 @@ def test_manifest_entries_from_catalogue_are_fail_closed(tmp_path):
     entries = manifest_entries_from_catalogue(catalogue)
 
     assert [(entry.scan_id, entry.tags, entry.include, entry.reason) for entry in entries] == [
-        ("scan cal00", ("calibrator",), False, "excluded calibrator scan"),
-        ("scan No0001", ("science",), True, "science scan"),
-        ("mpcc No0001", ("pcc",), False, "excluded phase-correction scan"),
+        ("scan cal00", ("local_calibration",), False, "local calibration input; not a network scan"),
+        ("scan No0001", ("scheduled",), True, "scheduled VLBI scan from CSV"),
+        ("mpcc No0001", ("local_phase_up",), False, "local phase-up operation; not a network scan"),
         ("setup", ("other",), False, "excluded unclassified scan"),
     ]
 
@@ -88,7 +88,7 @@ def test_build_scan_manifest_serialises_stable_schema(tmp_path):
         generated_utc=datetime(2026, 6, 2, 12, 0, tzinfo=timezone.utc),
     )
 
-    assert manifest["version"] == 1
+    assert manifest["version"] == 2
     assert manifest["source"] == "telstate_catalogue"
     assert manifest["generated_utc"] == "2026-06-02T12:00:00Z"
     assert manifest["scans"][1] == {
@@ -96,7 +96,9 @@ def test_build_scan_manifest_serialises_stable_schema(tmp_path):
         "start_time": "2026-04-22T12:19:00Z",
         "end_time": "2026-04-22T12:20:00Z",
         "target_name": "J1029A",
-        "tags": ["science"],
+        "tags": ["scheduled"],
         "include": True,
-        "reason": "science scan",
+        "reason": "scheduled VLBI scan from CSV",
+        "schedule_scan_id": "No0001",
+        "execution_status": "unknown",
     }

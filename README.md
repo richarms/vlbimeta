@@ -7,6 +7,18 @@ run as a scheduled postprocess task after `vlbi.<stream>` has finished recording
 on the same host as the recorder, with access to the local recorder output and
 the live capture-block telstate.
 
+The [CSV observing-plan contract](docs/csv_observation_plan.md) is now the
+runtime authority. ANTAB requires its verified capture-scoped input, and
+`vlbimeta-plan` generates a version-2 scan manifest without copying VDIF.
+Scheduled VLBI calibrators remain eligible; local calibration operations have
+separate roles. The controller continues to publish full-capture hard links.
+
+For optional reference/provenance, the
+[version-1 VEX input contract](docs/vex_schedule.md), publisher/consumer helpers
+and `vlbimeta-vex` CLI preserve original schedule bytes in capture-scoped
+telstate and verify saved input snapshots. VEX interpretation and per-scan VDIF
+assembly are not implemented yet.
+
 ## Role
 
 `vlbimeta` owns the science-facing VLBI product assembly after capture.
@@ -56,7 +68,7 @@ is retained; current full-capture output uses hard links on the same filesystem.
 ### Scan manifest
 
 The scan manifest should become the common selection contract for ANTAB, UVFLG,
-observation logs, and science-only VDIF rewriting.
+observation logs, and per-scan VDIF assembly (including scheduled VLBI calibrators).
 
 Input:
 
@@ -69,7 +81,7 @@ Output:
 
 - `scan_manifest.json`
 
-The first manifest schema should stay small:
+Schema 2 retains these fields:
 
 - `scan_id`
 - `start_time`
@@ -78,6 +90,12 @@ The first manifest schema should stay small:
 - `tags`
 - `include`
 - `reason`
+- `schedule_scan_id` (from the documented CSV label convention)
+- `execution_status` (currently `unknown`)
+
+The manifest records CSV timing authority, input provenance and
+`selection_applied_to_vdif=false`. See the
+[CSV contract](docs/csv_observation_plan.md) for role tags and compatibility.
 
 ### ANTAB
 
@@ -205,7 +223,8 @@ Implemented:
 - version-1 closed-capture handoff and stream-specific output paths
 - `pass_through` publication while retaining raw input
 - metadata-only product output for `pass_through`
-- telstate materialisation of the per-observation catalogue when present
+- required, verified capture-scoped CSV input for ANTAB, with an explicit local-file development override
+- schema-2 CSV scan manifests and a diagnostic `vlbimeta-plan` CLI
 - online telstate input helpers for future UVFLG/log products
 - pure UVFLG evaluation and rendering from scan manifest plus antenna histories
 - ANTAB prototype using telstate mean-power and calibrated-stream products
@@ -217,7 +236,6 @@ Still to clean up:
 - make the scan manifest the shared selection contract
 - wire UVFLG and observation-log generation into the controller runtime
 - define strict failure behaviour for missing online histories
-- remove packaged catalogues from the production path
 - align `metadata.json`, ANTAB, UVFLG, logs, and future VDIF filtering around the same scan selection
 
 ## Source Structure Direction

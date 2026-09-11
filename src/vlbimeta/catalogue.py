@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import math
 from pathlib import Path
+import re
 from typing import Any
 
 import katpoint
@@ -61,6 +63,8 @@ def parse_vlbi_catalogue(
     fixed header set so later products can decide which fields they require.
     """
     catalogue_path = Path(path)
+    if not math.isfinite(proc_buffer_sec) or proc_buffer_sec < 0:
+        raise ValueError("Processing buffer must be finite and non-negative")
     csv_lines = catalogue_path.read_text(encoding="utf-8").splitlines()
     obs_params: dict[str, Any] = {
         "EXPERIMENT": None,
@@ -69,6 +73,8 @@ def parse_vlbi_catalogue(
         "CHANNELS": {},
     }
     scans: list[VlbiCatalogueScan] = []
+    headers: set[str] = set()
+    scan_names: set[str] = set()
 
     for raw_line in csv_lines:
         line = raw_line.strip()
@@ -79,6 +85,9 @@ def parse_vlbi_catalogue(
             if not header:
                 continue
             header_key, *header_parts = header.split()
+            if header_key in headers:
+                raise ValueError(f"Duplicate catalogue header: {header_key}")
+            headers.add(header_key)
             if header_key.startswith("CH"):
                 obs_params["CHANNELS"][header_key] = header_parts
             elif header_parts:
@@ -89,8 +98,13 @@ def parse_vlbi_catalogue(
         if len(parts) < 7:
             raise ValueError(f"Invalid VLBI catalogue row in {catalogue_path}: {raw_line!r}")
         scan_name = parts[-3]
+        if not scan_name or scan_name in scan_names:
+            raise ValueError(f"Empty or duplicate catalogue scan label: {scan_name!r}")
+        scan_names.add(scan_name)
         start_time = _parse_start_time(parts[-2])
         duration = float(parts[-1])
+        if not math.isfinite(duration) or duration <= 0:
+            raise ValueError(f"Scan {scan_name!r} must have a finite positive duration")
         target = parts[0].split("|")[0].strip().lstrip("*")
         target_description = ", ".join(parts[:-3])
         proc_start_time = start_time - timedelta(seconds=proc_buffer_sec)
@@ -107,7 +121,12 @@ def parse_vlbi_catalogue(
             )
         )
 
-    scans.sort(key=lambda scan: scan.start_ts)
+    experiment = obs_params.get("EXPERIMENT")
+    if not isinstance(experiment, str) or not re.fullmatch(r"[A-Za-z0-9]+", experiment):
+        raise ValueError("Catalogue requires an alphanumeric EXPERIMENT header")
+    if not scans:
+        raise ValueError("Catalogue contains no scans")
+    scans.sort(key=lambda scan: scan.start_time)
     kp_targets = []
     for scan in scans:
         if scan.kp_target not in kp_targets:

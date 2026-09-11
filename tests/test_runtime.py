@@ -276,7 +276,7 @@ def test_materialise_catalogue_from_telstate_writes_verified_file(tmp_path: Path
         "vlbi_catalogue_format": "csv",
     }
 
-    path, info = materialise_catalogue_from_telstate(telstate, tmp_path, fallback_experiment="ep134f")
+    path, info = materialise_catalogue_from_telstate(telstate, tmp_path, capture_block_id="177")
 
     assert path == tmp_path / "vlbi_cat_ep134f.csv"
     assert path.read_text(encoding="utf-8") == content
@@ -295,7 +295,7 @@ def test_materialise_catalogue_from_telstate_rejects_bad_checksum(tmp_path: Path
     }
 
     with pytest.raises(ValueError, match="checksum mismatch"):
-        materialise_catalogue_from_telstate(telstate, tmp_path, fallback_experiment="ep134f")
+        materialise_catalogue_from_telstate(telstate, tmp_path, capture_block_id="177")
 
 
 def test_controller_parse_args_dataset_stream_name() -> None:
@@ -356,17 +356,26 @@ def test_capture_id_cannot_collide_with_stream_separator(tmp_path: Path) -> None
 
 
 @pytest.mark.parametrize("fail_generation", [False, True])
-def test_antab_uses_same_handoff_and_publication_paths(tmp_path: Path, monkeypatch, fail_generation) -> None:
+@pytest.mark.parametrize("input_source", ["telstate", "explicit_file"])
+def test_antab_uses_same_handoff_and_publication_paths(tmp_path: Path, monkeypatch, fail_generation, input_source) -> None:
     from vlbimeta import controller_entrypoint, telstate_antab_from_mean_power
 
     paths, manifest = make_capture(tmp_path)
     catalogue = Path(__file__).parents[1] / "src/vlbimeta/catalogues/vlbi_cat_es116a.csv"
-    obs_params = {"proposal_id": "ES116A"}
-    telstate = {"vlbi_catalogue_content": catalogue.read_text()}
+    obs_params = {"proposal_id": "UNRELATED-PROPOSAL"}
+    telstate = {
+        "vlbi_catalogue_content": catalogue.read_bytes(),
+        "vlbi_catalogue_name": catalogue.name,
+        "vlbi_catalogue_sha256": hashlib.sha256(catalogue.read_bytes()).hexdigest(),
+        "vlbi_catalogue_format": "csv",
+    }
+    if input_source == "explicit_file":
+        telstate = {}
     monkeypatch.setattr(controller_entrypoint, "_derive_obs_params", lambda *args: obs_params)
     monkeypatch.setattr(controller_entrypoint, "_open_capture_telstate", lambda *args: telstate)
 
     def generate(**kwargs):
+        assert kwargs["experiment"] == "ES116A"
         assert kwargs["metadata_dir"] == paths.writing_dir
         assert kwargs["power_dir"] == paths.tsys_dir
         if fail_generation:
@@ -377,6 +386,8 @@ def test_antab_uses_same_handoff_and_publication_paths(tmp_path: Path, monkeypat
 
     monkeypatch.setattr(telstate_antab_from_mean_power, "generate_antab_from_capture", generate)
     args = [str(tmp_path), "177", "sdp_vdif", "--mode", "antab", "--telstate", "unused:6379"]
+    if input_source == "explicit_file":
+        args += ["--catalogue", str(catalogue)]
     if fail_generation:
         with pytest.raises(RuntimeError, match="ANTAB generation failed"):
             controller_entrypoint.main(args)
@@ -388,6 +399,8 @@ def test_antab_uses_same_handoff_and_publication_paths(tmp_path: Path, monkeypat
         assert (paths.final_dir / "scan_manifest.json").is_file()
         assert (paths.final_vdif_dir / "metadata.json").is_file()
         metadata = json.loads(paths.metadata_path.read_text())
+        assert metadata["catalogue_source"] == input_source
+        assert metadata["experiment"] == "ES116A"
         assert metadata["final_vdif_dir"] == str(paths.final_vdif_dir)
         assert metadata["vdif_selection"] == "full_capture"
     assert read_capture_manifest(paths) == manifest
