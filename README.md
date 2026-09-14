@@ -13,6 +13,10 @@ runtime authority. ANTAB requires its verified capture-scoped input, and
 Scheduled VLBI calibrators remain eligible; local calibration operations have
 separate roles. The controller continues to publish full-capture hard links.
 
+The diagnostic [VDIF index and export budget tool](docs/vdif_index.md) hashes
+closed captures, locates frames by time/thread/byte offset, and measures indexing
+costs. It can budget CSV-selected exports without copying the recording.
+
 For optional reference/provenance, the
 [version-1 VEX input contract](docs/vex_schedule.md), publisher/consumer helpers
 and `vlbimeta-vex` CLI preserve original schedule bytes in capture-scoped
@@ -189,8 +193,9 @@ Output:
 - science-only VDIF product
 - provenance linking the raw staging product to the final science product
 
-The first implementation should use `baseband` for correctness before optimising
-large-file throughput.
+The diagnostic index inspects headers without decoding voltages. An independent
+reader such as `baseband` should verify future exports, including complete frame
+bytes, timestamps and thread order, before production publication.
 
 ## Controller Entrypoint
 
@@ -225,6 +230,7 @@ Implemented:
 - metadata-only product output for `pass_through`
 - required, verified capture-scoped CSV input for ANTAB, with an explicit local-file development override
 - schema-2 CSV scan manifests and a diagnostic `vlbimeta-plan` CLI
+- compact VDIF indexing, packet coverage and export storage/I/O budgets
 - online telstate input helpers for future UVFLG/log products
 - pure UVFLG evaluation and rendering from scan manifest plus antenna histories
 - ANTAB prototype using telstate mean-power and calibrated-stream products
@@ -273,6 +279,9 @@ Python code lives under `src/vlbimeta/` and is installable via `pyproject.toml`.
 Console entry points currently include:
 
 - `vlbimeta` / `vlbimeta.py`
+- `vlbimeta-plan`
+- `vlbimeta-vex`
+- `vlbimeta-vdif-index`
 - `vdif-power-summary`
 - `vdif-power-antab`
 - `telstate-antab-from-mean-power`

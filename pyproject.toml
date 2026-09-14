@@ -28,6 +28,7 @@ test = [
 vlbimeta = "vlbimeta.controller_entrypoint:main"
 vlbimeta-vex = "vlbimeta.vex_schedule:main"
 vlbimeta-plan = "vlbimeta.observation_plan:main"
+vlbimeta-vdif-index = "vlbimeta.vdif_index:main"
 vdif-power-summary = "vlbimeta.vdif_power_summary:main"
 vdif-power-antab = "vlbimeta.vdif_power_antab:main"
 telstate-antab-from-mean-power = "vlbimeta.telstate_antab_from_mean_power:main"

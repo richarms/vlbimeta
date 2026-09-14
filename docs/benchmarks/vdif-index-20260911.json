@@ -1,0 +1,388 @@
+{
+  "filesystem": "local ZFS scratch2; caches not controlled",
+  "first_index": {
+    "benchmark": {
+      "cpu_seconds": 0.208077595,
+      "frames_per_second": 8948.683233996513,
+      "index_bytes": 20480,
+      "input_mib_per_second": 42.94373896929784,
+      "process_peak_rss_kib": 63148,
+      "wall_seconds": 4.29113412508741
+    },
+    "capture_block_id": "1788963931",
+    "coverage": [
+      {
+        "first_tick": 5724684700800,
+        "frames": 9600,
+        "invalid_frames": 0,
+        "missing_between_endpoints": 0,
+        "stop_tick": 5724684710400,
+        "thread": 0
+      },
+      {
+        "first_tick": 5724684700800,
+        "frames": 9600,
+        "invalid_frames": 0,
+        "missing_between_endpoints": 0,
+        "stop_tick": 5724684710400,
+        "thread": 1
+      },
+      {
+        "first_tick": 5724684700800,
+        "frames": 9600,
+        "invalid_frames": 0,
+        "missing_between_endpoints": 0,
+        "stop_tick": 5724684710400,
+        "thread": 2
+      },
+      {
+        "first_tick": 5724684700800,
+        "frames": 9600,
+        "invalid_frames": 0,
+        "missing_between_endpoints": 0,
+        "stop_tick": 5724684710400,
+        "thread": 3
+      }
+    ],
+    "epoch_origin_ticks": {
+      "53": 5705164918400
+    },
+    "expected_threads": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "frames": 38400,
+    "frames_per_second": 3200,
+    "geometry": {
+      "bits_per_sample": 2,
+      "channels": 1,
+      "complex": 0,
+      "frame_bytes": 5032,
+      "header_bytes": 32,
+      "station_id": 28005,
+      "version": 1
+    },
+    "index_version": 1,
+    "raw_bytes": 193228800,
+    "raw_directory": "/scratch2/richarms/git/lab_tests/vlbi-20260909/local-capture/.vlbi/1788963931/sdp_vdif/raw",
+    "reference_epoch_cycle": "2000-2031",
+    "runs": 8,
+    "shards": [
+      {
+        "name": "1788963931_sdp_vdif.00000000",
+        "sha256": "922d19b2c423fb0ca38b9b312e43435088c3e5417f267e991c2d1e6f5e4aff5f",
+        "size_bytes": 134213504
+      },
+      {
+        "name": "1788963931_sdp_vdif.00000001",
+        "sha256": "65f19754071171ce8ba086abc579cfb45a33323b89d1dde11bf66dc898696c95",
+        "size_bytes": 59015296
+      }
+    ],
+    "status": "complete",
+    "stream_name": "sdp_vdif",
+    "time_axis": "TAI seconds since 1970-01-01 TAI, multiplied by frames_per_second"
+  },
+  "measured_on": "2026-09-11",
+  "n26l2_projection": {
+    "assumed_frame_bytes": 5032,
+    "assumed_payload_bytes_per_frame": 5000,
+    "assumed_payload_bytes_per_second": 64000000,
+    "catalogue": {
+      "catalogue_file": "vlbi_cat_n26l2.csv",
+      "catalogue_format": "csv",
+      "catalogue_sha256": "45899b0e290cf4e216e805cc07ec3867a494ee0838100f2bb9b2bc8614575d8d",
+      "catalogue_source": "explicit_file"
+    },
+    "continuous_science_span_seconds": 10800.0,
+    "costs_by_assumed_mib_per_second": {
+      "100": {
+        "additional_vdif_bytes": 544905216000,
+        "assumed_read_mib_per_second": 100,
+        "assumed_write_mib_per_second": 100,
+        "export_cpu_seconds": null,
+        "export_sequential_read_bytes": 695623680000,
+        "export_write_bytes": 544905216000,
+        "fully_overlapped_io_seconds": 6633.984375,
+        "index_input_bytes": 695623680000,
+        "index_plus_export_io_bytes": 1936152576000,
+        "raw_plus_export_bytes": 1240528896000,
+        "raw_retained_bytes": 695623680000,
+        "serial_io_seconds": 11830.60546875
+      },
+      "250": {
+        "additional_vdif_bytes": 544905216000,
+        "assumed_read_mib_per_second": 250,
+        "assumed_write_mib_per_second": 250,
+        "export_cpu_seconds": null,
+        "export_sequential_read_bytes": 695623680000,
+        "export_write_bytes": 544905216000,
+        "fully_overlapped_io_seconds": 2653.59375,
+        "index_input_bytes": 695623680000,
+        "index_plus_export_io_bytes": 1936152576000,
+        "raw_plus_export_bytes": 1240528896000,
+        "raw_retained_bytes": 695623680000,
+        "serial_io_seconds": 4732.2421875
+      },
+      "500": {
+        "additional_vdif_bytes": 544905216000,
+        "assumed_read_mib_per_second": 500,
+        "assumed_write_mib_per_second": 500,
+        "export_cpu_seconds": null,
+        "export_sequential_read_bytes": 695623680000,
+        "export_write_bytes": 544905216000,
+        "fully_overlapped_io_seconds": 1326.796875,
+        "index_input_bytes": 695623680000,
+        "index_plus_export_io_bytes": 1936152576000,
+        "raw_plus_export_bytes": 1240528896000,
+        "raw_retained_bytes": 695623680000,
+        "serial_io_seconds": 2366.12109375
+      }
+    },
+    "excludes": "local calibrations before/after the science span, recording margins, padding, losses, filesystem overhead",
+    "selected_seconds": 8460.0
+  },
+  "repeat_index": {
+    "benchmark": {
+      "cpu_seconds": 0.18751141800000004,
+      "frames_per_second": 39677.47286785184,
+      "index_bytes": 20480,
+      "input_mib_per_second": 190.40779444792787,
+      "process_peak_rss_kib": 63188,
+      "wall_seconds": 0.9678035727702081
+    },
+    "capture_block_id": "1788963931",
+    "coverage": [
+      {
+        "first_tick": 5724684700800,
+        "frames": 9600,
+        "invalid_frames": 0,
+        "missing_between_endpoints": 0,
+        "stop_tick": 5724684710400,
+        "thread": 0
+      },
+      {
+        "first_tick": 5724684700800,
+        "frames": 9600,
+        "invalid_frames": 0,
+        "missing_between_endpoints": 0,
+        "stop_tick": 5724684710400,
+        "thread": 1
+      },
+      {
+        "first_tick": 5724684700800,
+        "frames": 9600,
+        "invalid_frames": 0,
+        "missing_between_endpoints": 0,
+        "stop_tick": 5724684710400,
+        "thread": 2
+      },
+      {
+        "first_tick": 5724684700800,
+        "frames": 9600,
+        "invalid_frames": 0,
+        "missing_between_endpoints": 0,
+        "stop_tick": 5724684710400,
+        "thread": 3
+      }
+    ],
+    "epoch_origin_ticks": {
+      "53": 5705164918400
+    },
+    "expected_threads": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "frames": 38400,
+    "frames_per_second": 3200,
+    "geometry": {
+      "bits_per_sample": 2,
+      "channels": 1,
+      "complex": 0,
+      "frame_bytes": 5032,
+      "header_bytes": 32,
+      "station_id": 28005,
+      "version": 1
+    },
+    "index_version": 1,
+    "raw_bytes": 193228800,
+    "raw_directory": "/scratch2/richarms/git/lab_tests/vlbi-20260909/local-capture/.vlbi/1788963931/sdp_vdif/raw",
+    "reference_epoch_cycle": "2000-2031",
+    "runs": 8,
+    "shards": [
+      {
+        "name": "1788963931_sdp_vdif.00000000",
+        "sha256": "922d19b2c423fb0ca38b9b312e43435088c3e5417f267e991c2d1e6f5e4aff5f",
+        "size_bytes": 134213504
+      },
+      {
+        "name": "1788963931_sdp_vdif.00000001",
+        "sha256": "65f19754071171ce8ba086abc579cfb45a33323b89d1dde11bf66dc898696c95",
+        "size_bytes": 59015296
+      }
+    ],
+    "status": "complete",
+    "stream_name": "sdp_vdif",
+    "time_axis": "TAI seconds since 1970-01-01 TAI, multiplied by frames_per_second"
+  },
+  "source": "193228800-byte synthetic four-thread loopback recording from jive5ab, capture 1788963931",
+  "synthetic_export_plan": {
+    "capture_block_id": "1788963931",
+    "costs": {
+      "additional_vdif_bytes": 128819200,
+      "assumed_read_mib_per_second": 250,
+      "assumed_write_mib_per_second": 250,
+      "export_cpu_seconds": null,
+      "export_sequential_read_bytes": 193228800,
+      "export_write_bytes": 128819200,
+      "fully_overlapped_io_seconds": 0.737109375,
+      "index_input_bytes": 193228800,
+      "index_plus_export_io_bytes": 515276800,
+      "raw_plus_export_bytes": 322048000,
+      "raw_retained_bytes": 193228800,
+      "serial_io_seconds": 1.228515625
+    },
+    "frames_per_second": 3200,
+    "geometry": {
+      "bits_per_sample": 2,
+      "channels": 1,
+      "complex": 0,
+      "frame_bytes": 5032,
+      "header_bytes": 32,
+      "station_id": 28005,
+      "version": 1
+    },
+    "raw_revalidated": false,
+    "scan_manifest_sha256": "a63524bd02884f1be8016739e2bf6b248fb2d4d53bafafce9b7ac976a8541aad",
+    "scans": [
+      {
+        "complete_valid_frames": true,
+        "coverage": [
+          {
+            "frames": 3200,
+            "invalid_frames": 0,
+            "missing_frames": 0,
+            "source_runs": 1,
+            "thread": 0
+          },
+          {
+            "frames": 3200,
+            "invalid_frames": 0,
+            "missing_frames": 0,
+            "source_runs": 1,
+            "thread": 1
+          },
+          {
+            "frames": 3200,
+            "invalid_frames": 0,
+            "missing_frames": 0,
+            "source_runs": 1,
+            "thread": 2
+          },
+          {
+            "frames": 3200,
+            "invalid_frames": 0,
+            "missing_frames": 0,
+            "source_runs": 1,
+            "thread": 3
+          }
+        ],
+        "end_time": "2026-09-09T14:25:33Z",
+        "execution_status": "unknown",
+        "first_tick": 5724684700800,
+        "scan_id": "scan No0001",
+        "schedule_scan_id": "No0001",
+        "selected_bytes": 64409600,
+        "start_time": "2026-09-09T14:25:32Z",
+        "stop_tick": 5724684704000
+      },
+      {
+        "complete_valid_frames": true,
+        "coverage": [
+          {
+            "frames": 3200,
+            "invalid_frames": 0,
+            "missing_frames": 0,
+            "source_runs": 2,
+            "thread": 0
+          },
+          {
+            "frames": 3200,
+            "invalid_frames": 0,
+            "missing_frames": 0,
+            "source_runs": 2,
+            "thread": 1
+          },
+          {
+            "frames": 3200,
+            "invalid_frames": 0,
+            "missing_frames": 0,
+            "source_runs": 2,
+            "thread": 2
+          },
+          {
+            "frames": 3200,
+            "invalid_frames": 0,
+            "missing_frames": 0,
+            "source_runs": 2,
+            "thread": 3
+          }
+        ],
+        "end_time": "2026-09-09T14:25:35Z",
+        "execution_status": "unknown",
+        "first_tick": 5724684707200,
+        "scan_id": "scan No0002",
+        "schedule_scan_id": "No0002",
+        "selected_bytes": 64409600,
+        "start_time": "2026-09-09T14:25:34Z",
+        "stop_tick": 5724684710400
+      }
+    ],
+    "selection_applied_to_vdif": false,
+    "selection_policy": "whole frames contained in nominal CSV [start, end); no padding",
+    "stream_name": "sdp_vdif",
+    "version": 1
+  },
+  "synthetic_scan_plan": {
+    "capture_block_id": "1788963931",
+    "generated_utc": "2026-09-14T09:20:19.394242Z",
+    "scan_id_origin": "csv_scan_label",
+    "scans": [
+      {
+        "end_time": "2026-09-09T14:25:33Z",
+        "execution_status": "unknown",
+        "include": true,
+        "reason": "diagnostic selection",
+        "scan_id": "scan No0001",
+        "schedule_scan_id": "No0001",
+        "start_time": "2026-09-09T14:25:32Z",
+        "tags": [
+          "scheduled"
+        ],
+        "target_name": "synthetic packet source"
+      },
+      {
+        "end_time": "2026-09-09T14:25:35Z",
+        "execution_status": "unknown",
+        "include": true,
+        "reason": "diagnostic selection",
+        "scan_id": "scan No0002",
+        "schedule_scan_id": "No0002",
+        "start_time": "2026-09-09T14:25:34Z",
+        "tags": [
+          "scheduled"
+        ],
+        "target_name": "synthetic packet source"
+      }
+    ],
+    "selection_applied_to_vdif": false,
+    "source": "synthetic_lab_timeline_not_observation_execution",
+    "stream_name": "sdp_vdif",
+    "timing_authority": "csv_observation_plan",
+    "version": 2
+  }
+}
