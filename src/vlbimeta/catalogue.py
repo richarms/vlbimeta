@@ -63,9 +63,22 @@ def parse_vlbi_catalogue(
     fixed header set so later products can decide which fields they require.
     """
     catalogue_path = Path(path)
+    return parse_vlbi_catalogue_content(
+        catalogue_path.read_bytes(), proc_buffer_sec, ref_ant, source=str(catalogue_path)
+    )
+
+
+def parse_vlbi_catalogue_content(
+    content: bytes,
+    proc_buffer_sec: float = 1,
+    ref_ant: katpoint.Antenna | None = None,
+    *,
+    source: str = "<bytes>",
+) -> VlbiCatalogue:
+    """Parse frozen CSV bytes shared by an observer and its downstream publisher."""
     if not math.isfinite(proc_buffer_sec) or proc_buffer_sec < 0:
         raise ValueError("Processing buffer must be finite and non-negative")
-    csv_lines = catalogue_path.read_text(encoding="utf-8").splitlines()
+    csv_lines = content.decode("utf-8").splitlines()
     obs_params: dict[str, Any] = {
         "EXPERIMENT": None,
         "POL": None,
@@ -96,7 +109,7 @@ def parse_vlbi_catalogue(
 
         parts = [part.strip() for part in raw_line.split(",")]
         if len(parts) < 7:
-            raise ValueError(f"Invalid VLBI catalogue row in {catalogue_path}: {raw_line!r}")
+            raise ValueError(f"Invalid VLBI catalogue row in {source}: {raw_line!r}")
         scan_name = parts[-3]
         if not scan_name or scan_name in scan_names:
             raise ValueError(f"Empty or duplicate catalogue scan label: {scan_name!r}")
