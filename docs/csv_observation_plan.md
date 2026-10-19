@@ -8,6 +8,14 @@ when its schema is available.
 
 ## Producer and consumer contract
 
+The production observing path is `katsdpscripts/observation/vlbi_online.py`, a
+close copy of Marcel's existing observing and calibration procedure. The katobs
+tracking-only prototype is retired; neither the runtime nor tests require it.
+The katsdpscripts draft still needs product-specific capture selection and a
+deployed-session test. See [the CAM smoke procedure](cam_smoke.md) for the
+remaining integration prerequisites; this contract does not certify that draft
+as ready for live execution.
+
 The producer freezes the original UTF-8 CSV bytes before parsing the plan, then
 publishes those same bytes once the capture ID is known, before the first scan.
 All four keys below are required and immutable in
@@ -32,11 +40,15 @@ encoding. New producers must read in binary mode to preserve original line
 endings. Materialisation writes the verified bytes in binary mode without
 normalization and refuses to overwrite an existing file.
 
-The supplied `mgouws_vlbi/vlbi/observation/vlbi_online.py` copy now freezes the
+The `katsdpscripts/observation/vlbi_online.py` draft freezes the
 input before parsing and passes the frozen bytes to its publisher after
 `capture_start`. Its helpers require a capture ID from the session or its SDP
-capture-ID value; they no longer suppress capture-view errors. No extra package
-dependency was added to that script. Its `vlbi_experiment` key is supplementary:
+capture-ID value; they no longer suppress capture-view errors. This is not yet
+sufficient for sessions with separate wideband/narrowband products: select the
+actual product containing the requested `sdp.vdif` output and publish into that
+product's exclusive capture view. Recording currently starts at `capture_init`;
+publish once the authoritative identity exists and before scheduled observing
+work. Its `vlbi_experiment` key is supplementary:
 the authoritative experiment identifier is the CSV's `EXPERIMENT` header.
 
 ## Runtime changes
@@ -122,15 +134,19 @@ EL080 366/371, ES123A 54/56, EX011A 108/111, GS047C 39/42 and N26L2 14/16.
 Tests check exact bytes/digests, CSV timing, fractional boundaries, network
 calibrator inclusion, namespace isolation, strict runtime inputs and provenance.
 
-The actual observation publisher can be tested without importing telescope
-control code: tests load only its two publication helpers using the Python AST.
-Set `VLBI_OBSERVATION_SCRIPT=/path/to/vlbi_online.py` when that source is outside
-the workspace. Set `VLBIMETA_TEST_REDIS=host:port` to a disposable Redis to also
+The observation parser and publisher can be tested without importing telescope
+control code: tests load only their functions using the Python AST. They default
+to the sibling katsdpscripts checkout. Set
+`VLBI_OBSERVATION_SCRIPT=/path/to/vlbi_online.py` for a different location.
+The parser comparison covers all six site CSVs and checks scan identities,
+timings and targets. Publisher tests check exact bytes using a simplified
+session; they do not validate real multi-product capture selection.
+Set `VLBIMETA_TEST_REDIS=host:port` to a disposable Redis to also
 exercise its real immutable storage. The CSV integration test reserves and
 cleans only the four `177_vlbi_catalogue_*` keys above plus `177_vlbi_experiment`;
 it refuses pre-existing test keys. Run these tests serially.
 
-Next: confirm the maintained producer deployment, add execution/sensor histories,
-index raw VDIF frames and measure I/O cost. Choose the eventual scan-file export
-strategy using those measurements and consumer requirements. Preserve raw data
-and the existing handoff while establishing that evidence.
+Next: complete the maintained producer's capture selection and deployment, add
+execution/sensor histories, and integrate the measured index/export diagnostics
+only after agreeing consumer requirements and recovery behaviour. Preserve raw
+data and the existing handoff while establishing that evidence.

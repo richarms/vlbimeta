@@ -20,6 +20,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+preflight = [
+    "katsdpmodels[requests]",
+]
 test = [
     "pytest>=8",
 ]

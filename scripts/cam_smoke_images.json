@@ -1,0 +1,6 @@
+{
+  "katsdpcontroller": "harbor.sdp.kat.ac.za/dpp/katsdpcontroller@sha256:2989199406e6d13a903389c8a83a59a6faea7e3cafaa70d8a680b06393df06e6",
+  "katsdpvlbi": "harbor.sdp.kat.ac.za/dpp/katsdpvlbi@sha256:d557f78a1d13d5e6c880fba2d8292bc4b2790122b51c69145ffeeb0e5282d3c8",
+  "katsdpcam2telstate": "harbor.sdp.kat.ac.za/dpp/katsdpcam2telstate@sha256:e8b3eb6a4858a978085a14ffa52c900d90059e2d4fda897e1b1f687991af706a",
+  "vlbimeta": "harbor.sdp.kat.ac.za/dpp/vlbimeta@sha256:5068d178fe5074b6d34e496fb7e275903bcf69551bdd893c627b79b2abd291a7"
+}
