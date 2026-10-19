@@ -4,6 +4,9 @@
 compact, content-hashed index and budgets selection from a schema-2 CSV scan
 manifest. It does not decode voltages, copy VDIF, publish products, or change the
 controller path. The current full-capture hard links remain the delivered VDIF.
+An initial physical scan-export diagnostic and its attached-storage measurements
+are now described in [the export benchmark](vdif_export_benchmark.md). It accepts
+time/thread-ordered raw files and is separate from controller publication.
 
 ## Build and query
 
@@ -122,8 +125,10 @@ When both assumed bandwidths are supplied, the report gives `R/read + S/write`
 for serial I/O and `max(R/read, S/write)` for ideal independent overlapping I/O.
 Neither is a measured export time or a guaranteed bound on completion. Shared
 disks, seeking, sorting, CPU, fsync, concurrent capture and checksum verification
-can change the result. `export_cpu_seconds` is explicitly unknown: no exporter has
-been implemented or benchmarked. Omitting bandwidths leaves time estimates absent.
+can change the result. `export_cpu_seconds` remains explicitly unknown in this
+planning model. The separate October 16 exporter benchmark reports measured CPU
+and wall time; those measurements are not implicitly inserted as assumed rates.
+Omitting bandwidths leaves time estimates absent.
 
 ## Initial lab result
 

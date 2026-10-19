@@ -16,12 +16,19 @@ separate roles. The controller continues to publish full-capture hard links.
 The diagnostic [VDIF index and export budget tool](docs/vdif_index.md) hashes
 closed captures, locates frames by time/thread/byte offset, and measures indexing
 costs. It can budget CSV-selected exports without copying the recording.
+The separate [physical scan-export diagnostic](docs/vdif_export_benchmark.md)
+copies unchanged frames into scan files and records measured CPU, storage and
+I/O costs. It requires ordered input and is not part of controller publication.
+
+[CAM preparation and model preflight tools](docs/cam_smoke.md) preserve fresh
+allocations, require explicit image digests and describe the katsdpscripts
+observer prerequisites. They do not issue control requests.
 
 For optional reference/provenance, the
 [version-1 VEX input contract](docs/vex_schedule.md), publisher/consumer helpers
 and `vlbimeta-vex` CLI preserve original schedule bytes in capture-scoped
-telstate and verify saved input snapshots. VEX interpretation and per-scan VDIF
-assembly are not implemented yet.
+telstate and verify saved input snapshots. VEX interpretation and automatic
+per-scan VDIF delivery remain unimplemented.
 
 ## Role
 
@@ -193,9 +200,11 @@ Output:
 - science-only VDIF product
 - provenance linking the raw staging product to the final science product
 
-The diagnostic index inspects headers without decoding voltages. An independent
-reader such as `baseband` should verify future exports, including complete frame
-bytes, timestamps and thread order, before production publication.
+The diagnostic index inspects headers without decoding voltages. The standalone
+exporter preserves selected frame bytes and refuses disordered input; the
+benchmark includes independent baseband/UTC byte-range verification. Execution
+history, recipient format acceptance and production publication remain separate
+requirements.
 
 ## Controller Entrypoint
 
@@ -231,6 +240,7 @@ Implemented:
 - required, verified capture-scoped CSV input for ANTAB, with an explicit local-file development override
 - schema-2 CSV scan manifests and a diagnostic `vlbimeta-plan` CLI
 - compact VDIF indexing, packet coverage and export storage/I/O budgets
+- diagnostic ordered-input scan export and measured attached-storage benchmark
 - online telstate input helpers for future UVFLG/log products
 - pure UVFLG evaluation and rendering from scan manifest plus antenna histories
 - ANTAB prototype using telstate mean-power and calibrated-stream products
