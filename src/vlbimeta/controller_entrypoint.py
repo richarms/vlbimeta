@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import logging
 from pathlib import Path
 from typing import Sequence
@@ -21,7 +22,6 @@ from .runtime import (
     prepare_writing_dir,
     product_paths,
     read_capture_manifest,
-    resolve_catalogue_path,
     stage_vdif_product,
     write_metadata_json,
 )
@@ -58,7 +58,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--experiment",
         default=None,
-        help="Override the VLBI experiment identifier (defaults to telstate obs_params.proposal_id).",
+        help="Expected experiment identifier; in antab mode it must match the CSV EXPERIMENT header.",
     )
     parser.add_argument(
         "--station-code",
@@ -87,6 +87,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Seconds to expand each scan window by when selecting power samples [%(default)s].",
+    )
+    parser.add_argument(
+        "--catalogue",
+        type=Path,
+        help="Explicit local CSV for development; otherwise require the capture-scoped telstate CSV.",
     )
     parser.add_argument(
         "--catalogue-dir",
@@ -257,29 +262,36 @@ def main(argv: Sequence[str] | None = None) -> int:
     if obs_params is None:
         raise RuntimeError("obs_params could not be loaded from telstate")
 
-    experiment = derive_experiment_name(obs_params, args.experiment)
-    log.info("experiment=%s station_code=%s", experiment, args.station_code)
-    catalogue_path = None
-    catalogue_info: dict[str, str] = {}
-    if capture_telstate is not None:
-        catalogue_path, catalogue_info = materialise_catalogue_from_telstate(
-            capture_telstate,
-            paths.writing_dir / "catalogue",
-            fallback_experiment=experiment,
-        )
-    if catalogue_path is None:
-        catalogue_path = resolve_catalogue_path(catalogue_dir, experiment)
-        catalogue_info = {
-            "catalogue_file": catalogue_path.name,
-            "catalogue_source": "packaged",
+    catalogue_input = capture_telstate
+    if args.catalogue is not None:
+        local_path = args.catalogue if args.catalogue.is_absolute() else catalogue_dir / args.catalogue
+        from .runtime import MAX_CATALOGUE_BYTES
+
+        with local_path.open("rb") as stream:
+            content = stream.read(MAX_CATALOGUE_BYTES + 1)
+        catalogue_input = {
+            "vlbi_catalogue_content": content,
+            "vlbi_catalogue_name": local_path.name,
+            "vlbi_catalogue_sha256": hashlib.sha256(content).hexdigest(),
+            "vlbi_catalogue_format": "csv",
         }
-        log.warning("Using packaged VLBI catalogue fallback for experiment %s: %s", experiment, catalogue_path)
+    catalogue_path, catalogue_info = materialise_catalogue_from_telstate(
+        catalogue_input, paths.writing_dir / "catalogue", capture_block_id=args.capture_block_id,
+    )
+    if args.catalogue is not None:
+        catalogue_info["catalogue_source"] = "explicit_file"
     catalogue = parse_vlbi_catalogue(catalogue_path)
+    experiment = catalogue.obs_params["EXPERIMENT"]
+    if args.experiment is not None and args.experiment.casefold() != experiment.casefold():
+        raise ValueError("--experiment conflicts with the canonical CSV EXPERIMENT header")
+    log.info("experiment=%s station_code=%s", experiment, args.station_code)
     manifest_entries = manifest_entries_from_catalogue(catalogue)
     scan_manifest = build_scan_manifest(
         manifest_entries,
         source=f"{catalogue_info.get('catalogue_source', 'unknown')}_catalogue",
     )
+    scan_manifest.update(experiment=experiment, capture_block_id=args.capture_block_id,
+                         stream_name=args.stream_name, catalogue=catalogue_info)
     scan_manifest_path = paths.writing_dir / "scan_manifest.json"
     write_scan_manifest(scan_manifest_path, scan_manifest)
     selected_scan_count = sum(1 for entry in manifest_entries if entry.include)

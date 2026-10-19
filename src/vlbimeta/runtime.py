@@ -284,48 +284,65 @@ def resolve_catalogue_path(catalogue_dir: Path, experiment: str) -> Path:
     raise FileNotFoundError(f"Catalogue not found for experiment '{experiment}'. Tried: {joined}")
 
 
+MAX_CATALOGUE_BYTES = 16 * 1024 * 1024
+
+
 def materialise_catalogue_from_telstate(
     telstate: Any,
     output_dir: Path,
-    fallback_experiment: str | None = None,
-) -> tuple[Path | None, dict[str, str]]:
-    if VLBI_CATALOGUE_CONTENT_KEY not in telstate:
-        return None, {}
+    *,
+    capture_block_id: str | None,
+) -> tuple[Path, dict[str, str]]:
+    """Require the exact capture's CSV and checksum, with no namespace fallback.
+
+    A plain mapping is supported for offline snapshots. Live telstate keys must
+    be immutable. Content may be bytes (preferred) or legacy UTF-8 text; neither
+    is normalized while being materialised.
+    """
+    if capture_block_id is not None and (not isinstance(capture_block_id, str)
+            or not re.fullmatch(r"[0-9]+", capture_block_id)):
+        raise ValueError("A decimal capture_block_id is required")
+    keys = (VLBI_CATALOGUE_CONTENT_KEY, VLBI_CATALOGUE_SHA256_KEY,
+            VLBI_CATALOGUE_NAME_KEY, VLBI_CATALOGUE_FORMAT_KEY)
+    if hasattr(telstate, "view"):
+        from katsdptelstate import KeyType
+
+        if capture_block_id is None:
+            raise ValueError("Live CSV input requires an explicit capture_block_id")
+        telstate = telstate.view(capture_block_id, exclusive=True)
+        for key in keys:
+            kind = telstate.key_type(key)
+            if kind is None:
+                raise KeyError(f"Missing capture-scoped CSV input: {capture_block_id}_{key}")
+            if kind != KeyType.IMMUTABLE:
+                raise ValueError(f"CSV input must be immutable: {key}")
+    # Read and validate everything before creating any files.
     content = telstate[VLBI_CATALOGUE_CONTENT_KEY]
-    if isinstance(content, bytes):
-        content_bytes = content
-        content_text = content.decode("utf-8")
-    elif isinstance(content, str):
-        content_text = content
-        content_bytes = content.encode("utf-8")
-    else:
-        raise TypeError(f"Expected telstate catalogue content to be str or bytes, got {type(content)!r}")
-    actual_sha256 = hashlib.sha256(content_bytes).hexdigest()
-    expected_sha256 = telstate[VLBI_CATALOGUE_SHA256_KEY] if VLBI_CATALOGUE_SHA256_KEY in telstate else None
-    if expected_sha256 is not None and expected_sha256 != actual_sha256:
-        raise ValueError(
-            f"VLBI catalogue checksum mismatch: telstate has {expected_sha256}, materialised content is {actual_sha256}"
-        )
-    raw_name = telstate[VLBI_CATALOGUE_NAME_KEY] if VLBI_CATALOGUE_NAME_KEY in telstate else None
-    if isinstance(raw_name, str) and raw_name.strip():
-        catalogue_name = Path(raw_name).name
-    elif fallback_experiment:
-        catalogue_name = f"vlbi_cat_{fallback_experiment}.csv"
-    else:
-        catalogue_name = "vlbi_catalogue.csv"
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    if not isinstance(content, bytes) or not 0 < len(content) <= MAX_CATALOGUE_BYTES:
+        raise ValueError(f"CSV content must be 1..{MAX_CATALOGUE_BYTES} bytes or UTF-8 text")
+    content.decode("utf-8")
+    checksum = hashlib.sha256(content).hexdigest()
+    if telstate[VLBI_CATALOGUE_SHA256_KEY] != checksum:
+        raise ValueError("VLBI catalogue checksum mismatch")
+    if telstate[VLBI_CATALOGUE_FORMAT_KEY] != "csv":
+        raise ValueError("Unsupported catalogue format (expected csv)")
+    name = telstate[VLBI_CATALOGUE_NAME_KEY]
+    if (not isinstance(name, str) or not name.strip() or name in (".", "..")
+            or "/" in name or "\\" in name or len(name) > 255
+            or any(ord(c) < 32 for c in name)):
+        raise ValueError("Catalogue name must be a basename without control characters")
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / catalogue_name
-    output_path.write_text(content_text, encoding="utf-8")
-    info = {
-        "catalogue_file": catalogue_name,
-        "catalogue_sha256": actual_sha256,
+    path = output_dir / name
+    with path.open("xb") as stream:
+        stream.write(content)
+    return path, {
+        "catalogue_file": name,
+        "catalogue_format": "csv",
+        "catalogue_sha256": checksum,
         "catalogue_source": "telstate",
     }
-    if VLBI_CATALOGUE_FORMAT_KEY in telstate:
-        catalogue_format = telstate[VLBI_CATALOGUE_FORMAT_KEY]
-        if isinstance(catalogue_format, str) and catalogue_format.strip():
-            info["catalogue_format"] = catalogue_format.strip()
-    return output_path, info
 
 
 def default_mean_power_sensor_keys(

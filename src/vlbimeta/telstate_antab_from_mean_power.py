@@ -16,6 +16,7 @@ from astropy.time import Time as ap_time
 import katdal
 import katsdptelstate
 
+from .manifest import scan_class
 from .runtime import default_mean_power_sensor_keys
 from .runtime import candidate_mean_power_sensor_key_sets
 from .vdif_power_antab import (
@@ -290,9 +291,9 @@ def main() -> None:
         args.mean_power_template,
         args.alt_templates,
     )
-    antab_scans = [scan_name for scan_name in scan_data.keys() if scan_name.startswith("scan No")]
+    antab_scans = [scan_name for scan_name in scan_data if scan_class(scan_name, vex_params) == "scheduled"]
     if not antab_scans:
-        raise RuntimeError("No scans matching 'scan No*' found in the catalogue for ANTAB generation.")
+        raise RuntimeError("No scheduled VLBI scans found in the catalogue for ANTAB generation.")
     scan_subset = {scan_name: scan_data[scan_name] for scan_name in antab_scans}
 
     tsys_fns = derive_tsys_files(
@@ -370,9 +371,9 @@ def generate_antab_from_capture(
     if sensor_series is None:
         assert last_error is not None
         raise last_error
-    antab_scans = [scan_name for scan_name in scan_data.keys() if scan_name.startswith("scan No")]
+    antab_scans = [scan_name for scan_name in scan_data if scan_class(scan_name, vex_params) == "scheduled"]
     if not antab_scans:
-        raise RuntimeError("No scans matching 'scan No*' found in the catalogue for ANTAB generation.")
+        raise RuntimeError("No scheduled VLBI scans found in the catalogue for ANTAB generation.")
     scan_subset = {scan_name: scan_data[scan_name] for scan_name in antab_scans}
 
     tsys_fns = derive_tsys_files(

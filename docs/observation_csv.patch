@@ -1,0 +1,101 @@
+--- a/vlbi_observation.py
++++ b/vlbi_observation.py
+@@ -1,6 +1,9 @@
+ #!/usr/bin/env python
+ # Observation script for VLBI observations. 
+ 
++import hashlib
++import io
++from pathlib import Path
+ import time
+ import numpy as np
+ import scipy.ndimage
+@@ -142,7 +145,7 @@
+     return False
+ 
+ 
+-def parse_vlbi_cat(vlbi_cat_fn, ref_ant=None):
++def parse_vlbi_cat(vlbi_cat_fn, ref_ant=None, content=None):
+     """ Parses the provided VLBI catalogue file and provides a list of scan parameters and
+     a katpoint catalogue of unique targets in the observation. 
+ 
+@@ -164,7 +167,8 @@
+ 
+     """
+     # Read the VLBI catalogue file 
+-    with open(vlbi_cat_fn, 'r') as cat_file:
++    with (io.StringIO(content.decode('utf-8')) if content is not None
++          else open(vlbi_cat_fn, 'r')) as cat_file:
+         csv_lines = [line for line in cat_file.readlines()]
+         # Read header info
+         obs_params = {}
+@@ -199,6 +203,45 @@
+                 kp_target_list.append(sp['kp_tgt'])
+         vlbi_cat = katpoint.Catalogue(kp_target_list, antenna=ref_ant)
+     return obs_params, scan_params, vlbi_cat
++
++
++def _get_capture_telstate(session):
++    """Require an authoritative capture identity and disable namespace fallback."""
++    telstate = getattr(session, 'telstate', None)
++    if telstate is None:
++        telstate = getattr(session, '_telstate', None)
++    if telstate is None:
++        raise RuntimeError("Observation session does not expose a telstate handle")
++    capture_block_id = getattr(session, 'capture_block_id', None)
++    if capture_block_id is None:
++        capture_block_id = telstate['sdp_capture_block_id']
++    if (not isinstance(capture_block_id, str) or not capture_block_id
++            or any(c not in '0123456789' for c in capture_block_id)):
++        raise ValueError("A decimal capture_block_id is required for CSV publication")
++    return telstate.view(capture_block_id, exclusive=True)
++
++
++def persist_vlbi_catalogue(session, catalogue_path, experiment, content=None):
++    """Publish the executed CSV under the capture's canonical vlbi_catalogue_* keys."""
++    catalogue_file = Path(catalogue_path).expanduser().resolve()
++    if content is None:
++        with catalogue_file.open('rb') as stream:
++            content = stream.read(16 * 1024 * 1024 + 1)
++    catalogue_content = content
++    if not isinstance(catalogue_content, bytes) or not 0 < len(catalogue_content) <= 16 * 1024 * 1024:
++        raise ValueError("CSV catalogue must be non-empty and at most 16 MiB")
++    catalogue_content.decode('utf-8')
++    catalogue_sha256 = hashlib.sha256(catalogue_content).hexdigest()
++    telstate = _get_capture_telstate(session)
++    key_values = {
++        'vlbi_catalogue_content': catalogue_content,
++        'vlbi_catalogue_sha256': catalogue_sha256,
++        'vlbi_catalogue_name': catalogue_file.name,
++        'vlbi_experiment': experiment,
++        'vlbi_catalogue_format': 'csv',
++    }
++    for key, value in key_values.items():
++        telstate.add(key, value, immutable=True)
+ 
+ 
+ class vlbi_observation_manager():
+@@ -623,7 +666,12 @@
+     # Set reference antenna 
+     ref_ant = kat.sources.antenna
+     # Read observation scan parameters and catalogue
+-    exp_pars, scan_pars, obs_cat = parse_vlbi_cat(args[0], ref_ant)
++    # Freeze the input used for both execution and downstream publication.
++    with Path(args[0]).open('rb') as catalogue_file:
++        catalogue_content = catalogue_file.read(16 * 1024 * 1024 + 1)
++    if not 0 < len(catalogue_content) <= 16 * 1024 * 1024:
++        raise ValueError('CSV catalogue must be non-empty and at most 16 MiB')
++    exp_pars, scan_pars, obs_cat = parse_vlbi_cat(args[0], ref_ant, content=catalogue_content)
+     mcal_scan_name = exp_pars['CAL_PREFIX'].lower()
+     mpcc_scan_name = exp_pars['PCC_PREFIX'].lower()
+     mpcc_verification_scans = True if exp_pars['PCC_VERIFICATION']=='True' else False
+@@ -639,6 +687,9 @@
+         session.standard_setup(**vars(opts))               
+         # Start SDP capture.  
+         session.capture_start()
++        # Persist the exact per-observation catalogue used by this script into
++        # capture-scoped vlbi_catalogue_* keys for downstream processing.
++        persist_vlbi_catalogue(session, args[0], exp_pars['EXPERIMENT'], content=catalogue_content)
+             
+         #FIXME Loop counters to prevent infinite loop errors.
+         loop_count, max_loops = 0, 10*len(scan_pars) 

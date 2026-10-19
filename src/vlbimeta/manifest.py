@@ -5,13 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from typing import Any, Mapping, Sequence
 
 from .catalogue import VlbiCatalogue, VlbiCatalogueScan
 from .runtime import write_metadata_json
 
 
-MANIFEST_VERSION = 1
+MANIFEST_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class ScanManifestEntry:
     tags: tuple[str, ...]
     include: bool
     reason: str
+    schedule_scan_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -33,6 +35,8 @@ class ScanManifestEntry:
             "tags": list(self.tags),
             "include": self.include,
             "reason": self.reason,
+            "schedule_scan_id": self.schedule_scan_id,
+            "execution_status": "unknown",
         }
 
 
@@ -41,30 +45,40 @@ def _iso_datetime_z(value: datetime) -> str:
         value = value.replace(tzinfo=timezone.utc)
     else:
         value = value.astimezone(timezone.utc)
-    return value.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def schedule_scan_id(scan_name: str) -> str | None:
+    """Extract the original ID under the supplied CSV 'scan NoNNNN' convention.
+
+    This is a CSV label mapping, not proof of membership in a particular VEX.
+    Local calibration labels have no network scan ID. Preserve identifier case.
+    """
+    match = re.fullmatch(r"(?i:scan)\s+([Nn][Oo][0-9]+)", scan_name)
+    return match[1] if match else None
 
 
 def scan_class(scan_name: str, obs_params: Mapping[str, Any]) -> str:
     lowered = scan_name.lower()
-    cal_prefix = str(obs_params.get("CAL_PREFIX", "")).lower()
-    pcc_prefix = str(obs_params.get("PCC_PREFIX", "")).lower()
+    cal_prefix = str(obs_params.get("CAL_PREFIX") or "").lower()
+    pcc_prefix = str(obs_params.get("PCC_PREFIX") or "").lower()
     if cal_prefix and lowered.startswith(cal_prefix):
-        return "calibrator"
+        return "local_calibration"
     if pcc_prefix and lowered.startswith(pcc_prefix):
-        return "pcc"
-    if lowered.startswith("scan no"):
-        return "science"
+        return "local_phase_up"
+    if schedule_scan_id(scan_name) is not None:
+        return "scheduled"
     return "other"
 
 
 def classify_scan(scan: VlbiCatalogueScan, obs_params: Mapping[str, Any]) -> tuple[tuple[str, ...], bool, str]:
     tag = scan_class(scan.name, obs_params)
-    if tag == "science":
-        return (tag,), True, "science scan"
-    if tag == "calibrator":
-        return (tag,), False, "excluded calibrator scan"
-    if tag == "pcc":
-        return (tag,), False, "excluded phase-correction scan"
+    if tag == "scheduled":
+        return (tag,), True, "scheduled VLBI scan from CSV"
+    if tag == "local_calibration":
+        return (tag,), False, "local calibration input; not a network scan"
+    if tag == "local_phase_up":
+        return (tag,), False, "local phase-up operation; not a network scan"
     return (tag,), False, "excluded unclassified scan"
 
 
@@ -81,6 +95,7 @@ def manifest_entries_from_catalogue(catalogue: VlbiCatalogue) -> list[ScanManife
                 tags=tags,
                 include=include,
                 reason=reason,
+                schedule_scan_id=schedule_scan_id(scan.name) if include else None,
             )
         )
     return entries
@@ -96,6 +111,9 @@ def build_scan_manifest(
     return {
         "version": MANIFEST_VERSION,
         "source": source,
+        "timing_authority": "csv_observation_plan",
+        "scan_id_origin": "csv_scan_label",
+        "selection_applied_to_vdif": False,
         "generated_utc": _iso_datetime_z(generated),
         "scans": [entry.to_dict() for entry in entries],
     }
