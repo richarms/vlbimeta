@@ -161,7 +161,7 @@ def test_experiment_override_cannot_replace_csv_identity(tmp_path, monkeypatch):
 
 @pytest.fixture
 def observation_publisher():
-    default = Path(__file__).parents[2] / "mgouws_vlbi/vlbi/observation/vlbi_online.py"
+    default = Path(__file__).parents[2] / "katsdpscripts/observation/vlbi_online.py"
     path = Path(os.environ.get("VLBI_OBSERVATION_SCRIPT", default))
     if not path.exists():
         pytest.skip("Set VLBI_OBSERVATION_SCRIPT to check the actual observation publisher")
